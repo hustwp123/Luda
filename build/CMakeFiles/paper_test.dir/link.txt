@@ -1,0 +1,1 @@
+/usr/local/cuda-10.1/bin/nvcc -arch=sm_61 CMakeFiles/paper_test.dir/util/decode_kv.cu.o      CMakeFiles/paper_test.dir/util/testharness.cc.o CMakeFiles/paper_test.dir/util/testutil.cc.o CMakeFiles/paper_test.dir/db/paper_test.cc.o  -o paper_test libleveldb.a -lpthread 

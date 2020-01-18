@@ -360,7 +360,7 @@ fabric.properties
 
 ### CMake ###
 CMakeCache.txt
-CMakeFiles
+#CMakeFiles
 CMakeScripts
 Testing
 Makefile
