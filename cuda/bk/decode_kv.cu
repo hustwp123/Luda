@@ -448,6 +448,7 @@ Slice SSTSort::FindL0Smallest() {
 
 __host__
 void SSTSort::Sort() {
+    printf(stderr,"sort2\n");
     Slice low_key, high_key, last_user_key;
     uint64_t last_seq = kMaxSequenceNumber;
 

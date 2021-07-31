@@ -53,7 +53,7 @@ void create_db(bool write = false) {
     options.write_buffer_size = 15 * 1024 * 1024;
     options.max_file_size = 15 * 1024 * 1024;
     options.filter_policy = NewBloomFilterPolicy(10);
-    leveldb::Status status = leveldb::DB::Open(options, "testdb", &db);
+    leveldb::Status status = leveldb::DB::Open(options, "/mnt/OPTANE280G/wp/testdb", &db);
     assert(status.ok());
 
     string value(1024 * 1, 'a');
@@ -88,7 +88,7 @@ void check_db() {
     leveldb::Version* ver;
 
     options.create_if_missing = true;
-    leveldb::Status status = leveldb::DB::Open(options, "testdb", &db);
+    leveldb::Status status = leveldb::DB::Open(options, "/mnt/OPTANE280G/wp/testdb", &db);
     assert(status.ok());
 
     impl = (leveldb::DBImpl*) db;

@@ -17,6 +17,7 @@
 #define CUDA_MAX_GDI_PER_SST (CUDA_MAX_KEY_PER_SST / K_SHARED_KEYS + 100)
 #define CUDA_MAX_KEYS_COMPACTION (CUDA_MAX_KEY_PER_SST * CUDA_MAX_COMPACTION_FILES)
 
+
 #include "db/version_set.h"
 
 #include "cuda/util.h"
@@ -140,6 +141,8 @@ public:
 
      
     int internal_compare(const gpu::Slice &b) const;
+
+    
 
     // Return true iff "x" is a prefix of "*this"
      
@@ -368,6 +371,7 @@ public:
         high_skvs_.push_back(skv);
     }
 
+     void WpSort();
      void Sort();
 
 

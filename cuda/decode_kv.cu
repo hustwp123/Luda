@@ -10,9 +10,13 @@
 
 #include "cuda/decode_kv.h"
 #include "util/crc32c.h"
+#include <stdio.h>
+
+#include "/home/wp/moderngpu/src/moderngpu/kernel_merge.hxx"
 
 #define M (512 * (__SST_SIZE / (1024 * 1024 * 4)))
 #define N (32)
+using namespace mgpu;
 
 namespace leveldb {
 namespace gpu {
@@ -658,8 +662,198 @@ Slice SSTSort::FindL0Smallest() {
     return min_key;
 }
 
+class WpSlice {
+public:  
+    //WpSlice() : data_(""), size_(0) {}
+    // WpSlice(const char *d, size_t n) : data_(d), size_(n) {}
+    //WpSlice(const char *d, size_t n, uint32_t off, int len) : data_(d), size_(n), offset_(off), value_len_(len) {}
+   // WpSlice(const char *s) : data_(s), size_(strlen(s)) {}
+    // WpSlice(const WpSlice &) = default;
+    // WpSlice &operator=(const WpSlice &) = default;  
+    // const char *data() const { return data_; }
+    // size_t size() const { return size_; }
+    // bool empty() const { return size_ == 0; }
+    
+    // // Change this slice to refer to an empty array
+     
+    // void clear() {
+    //     data_ = "";
+    //     size_ = 0;
+    // }
+
+
+    MGPU_HOST_DEVICE bool operator <(const WpSlice& b)
+    {
+        //return offset_<b.offset_;
+
+        size_t min_len=(size_ < b.size_) ? size_ : b.size_;
+        min_len-=8;
+        for(int i=0;i<min_len;i++)
+        {
+            if(data_[i]<b.data_[i])
+            {
+                return true;
+            }
+            if(data_[i]>b.data_[i])
+            {
+                return false;
+            }
+        }
+        if(size_<b.size_)
+        {
+            return true;
+        }
+        if(size_>b.size_)
+        {
+            return false;
+        }
+        // return true;
+
+
+        uint64_t anum,bnum;
+        Memcpy((char*)&anum,data_+size_-8,sizeof(anum));
+        Memcpy((char*)&bnum,b.data_+b.size_-8,sizeof(bnum));
+        return anum<bnum;
+    }
+
+public:
+    uint32_t offset_;
+    int value_len_;
+
+    //mem_t<char> data;
+    char *data_;
+    char *data2;
+
+    size_t size_;
+};
+
+
+void SSTSort::WpSort() {
+    standard_context_t context;
+    Slice low_key, high_key, last_user_key;
+    uint64_t last_seq = kMaxSequenceNumber;
+    std::vector<WpSlice> low,high;
+    for(int i=0;i<low_skvs_.size();i++)
+    {
+        SST_kv *pskv=low_skvs_[i];
+        for(int skv_idx=0;skv_idx<low_sizes_[i];skv_idx++)
+        {
+            //WpSlice(const char *d, size_t n, uint32_t off, int len) : data_(d), size_(n), offset_(off), value_len_(len) {}
+            WpSlice temp;
+
+            temp.data_=(char*)context.alloc(sizeof(char) * pskv[skv_idx].key_size, memory_space_device);
+            cudaError_t result=htod(temp.data_,pskv[skv_idx].ikey,pskv[skv_idx].key_size);
+            if(cudaSuccess != result) throw cuda_exception_t(result);
+
+            //temp.data(pskv[skv_idx].key_size,context);
+            //cudaError_t result=htod(temp.data.data(),pskv[skv_idx].ikey,pskv[skv_idx].key_size);
+            //temp.data_=temp.data.data();
+            //if(cudaSuccess != result) throw cuda_exception_t(result);
+            // if(pskv[skv_idx].key_size>200)
+            // {
+            //     fprintf(stderr,"key size too large\n");
+            //     exit(-1);
+            // }
+            // for(int k=0;k<pskv[skv_idx].key_size;k++)
+            // {
+            //     temp.data_[k]=pskv[skv_idx].ikey[k];
+            // }
+            temp.data2=pskv[skv_idx].ikey;
+            temp.size_=pskv[skv_idx].key_size;
+            temp.offset_=pskv[skv_idx].value_offset;
+            temp.value_len_=pskv[skv_idx].value_size;
+            low.push_back(temp);
+            //low.push_back(WpSlice(pskv[skv_idx].ikey, pskv[skv_idx].key_size, pskv[skv_idx].value_offset, pskv[skv_idx].value_size));
+        }
+    }
+    for(int i=0;i<high_skvs_.size();i++)
+    {
+        SST_kv *pskv=high_skvs_[i];
+        for(int skv_idx=0;skv_idx<high_sizes_[i];skv_idx++)
+        {
+            WpSlice temp;
+
+            temp.data_=(char*)context.alloc(sizeof(char) * pskv[skv_idx].key_size, memory_space_device);
+            cudaError_t result=htod(temp.data_,pskv[skv_idx].ikey,pskv[skv_idx].key_size);
+            if(cudaSuccess != result) throw cuda_exception_t(result);
+
+            // if(pskv[skv_idx].key_size>200)
+            // {
+            //     fprintf(stderr,"key size too large\n");
+            //     exit(-1);
+            // }
+            // for(int k=0;k<pskv[skv_idx].key_size;k++)
+            // {
+            //     temp.data_[k]=pskv[skv_idx].ikey[k];
+            // }
+            temp.data2=pskv[skv_idx].ikey;
+            temp.size_=pskv[skv_idx].key_size;
+            temp.offset_=pskv[skv_idx].value_offset;
+            temp.value_len_=pskv[skv_idx].value_size;
+            high.push_back(temp);
+            //high.push_back(WpSlice(pskv[skv_idx].ikey, pskv[skv_idx].key_size, pskv[skv_idx].value_offset, pskv[skv_idx].value_size));
+        }
+    }
+    mem_t<WpSlice> a = to_mem(low,context);
+    mem_t<WpSlice> b = to_mem(high,context);
+    mem_t<WpSlice> c(low.size()+high.size(), context);
+    merge(a.data(), low.size(), b.data(), high.size(), c.data(), 
+      mgpu::less_t<WpSlice>(), context);
+    std::vector<WpSlice> c_host = from_mem(c);
+
+
+    for(WpSlice& i : c_host)
+    {
+        bool drop = false;
+        Slice low_key=Slice(i.data2,i.size_,i.offset_,i.value_len_);
+        Slice min_user_key(low_key.data(), low_key.size() - 8);
+        if (!last_user_key.empty() && last_user_key.compare(min_user_key) != 0) {
+            //last_user_key = min_user_key;
+            last_seq = kMaxSequenceNumber;
+        }
+        last_user_key = min_user_key;
+        uint64_t inum = DecodeFixed64(low_key.data() + low_key.size() - 8);
+        uint64_t iseq = inum >> 8;
+        uint8_t  itype = inum & 0xff;
+        if (last_seq <= seq_) {
+            drop = true;
+        } else if (itype == kTypeDeletion &&iseq <= seq_) {
+            drop = true;
+        }
+        last_seq = iseq;
+        // 3. Write KV to out_
+        if (!drop) {
+           Memcpy(out_[out_size_].ikey, low_key.data(), low_key.size());
+           out_[out_size_].key_size = low_key.size();
+           out_[out_size_].value_size = low_key.value_len_;
+           out_[out_size_].value_offset = low_key.offset_;
+
+           ++ out_size_;
+        }
+
+    }
+    for(int i=0;i<low.size();i++)
+    {
+        if(low[i].data_) 
+            context.free(low[i].data_, memory_space_device);
+    }
+
+    for(int i=0;i<high.size();i++)
+    {
+        if(high[i].data_) 
+            context.free(high[i].data_, memory_space_device);
+    }
+        
+}
+
 __host__
 void SSTSort::Sort() {
+    // if(l0_skvs_.empty())
+    // {
+    //     WpSort();
+    //     return;
+    // }
+
     Slice low_key, high_key, last_user_key;
     uint64_t last_seq = kMaxSequenceNumber;
 

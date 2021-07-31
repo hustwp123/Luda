@@ -39,6 +39,10 @@
 #include "cuda/cuda_common.h"
 #include <unistd.h>
 
+
+
+
+
 // GPU_ACCELERATE 1:open, 0:close
 #define GPU_ACCELERATE (1)
 
@@ -251,7 +255,10 @@ DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
       manual_compaction_(nullptr),
       gpu_write_l0_(false),
       versions_(new VersionSet(dbname_, &options_, table_cache_,
-                               &internal_comparator_)) {}
+                               &internal_comparator_)) {
+                                 
+
+                               }
 
 DBImpl::~DBImpl() {
   // Wait for background work to finish.
@@ -1304,6 +1311,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     //printf("decode time:%ld ", duration);
 
     sort.Sort();
+
     IMM_WRITE();
 
     duration = (env_->NowMicros() - compaction_start);
