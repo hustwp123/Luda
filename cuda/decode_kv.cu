@@ -133,7 +133,8 @@ void SSTDecode::DoDecode() {
     Slice footer_slice(h_SST_ + file_size_ - leveldb::Footer::kEncodedLength,
             leveldb::Footer::kEncodedLength);
     Footer footer;
-    footer.DecodeFrom(&footer_slice);
+    footer.DecodeFrom(&footer_slice); //xp BUG - BlockHandle method is not consist when 
+                                      //         `cmake -DCMAKE_BUILD_TYPE=` is `Debug` or `Release`
 
     // 2. Iterator index-block and decode it to GDI
     char *contents = h_SST_ + footer.index_handle_.offset_;

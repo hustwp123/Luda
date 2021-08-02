@@ -727,7 +727,7 @@ class Benchmark {
         const int k = seq ? i + j : (thread->rand.Next() % FLAGS_num);
         char key[100];
         snprintf(key, sizeof(key), "%016d", k);
-        //printf("%d\n", strlen(key));
+        //fprintf(stderr, "%s,(%d)\n", key, strlen(key)); //xp
         batch.Put(key, gen.Generate(value_size_));
         bytes += value_size_ + strlen(key);
         thread->stats.FinishedSingleOp();
@@ -968,6 +968,10 @@ int main(int argc, char** argv) {
       exit(1);
     }
   }
+
+  fprintf(stdout, "commands ");
+  for(int i = 0; i < argc; i++) { fprintf(stdout, "%s ", argv[i]); }
+  fprintf(stdout, "\n");
 
   leveldb::g_env = leveldb::Env::Default();
 

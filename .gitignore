@@ -1,6 +1,26 @@
 
 # Created by https://www.gitignore.io/api/c,vim,c++,tags,latex,linux,macos,cmake,emacs,python,dropbox,windows,notepadpp,clion+all,powershell,sublimetext,microsoftoffice,visualstudiocode
 
+build/.cmake/*
+build.debug
+build.release
+
+### VisualStudioCode ###
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# Local History for Visual Studio Code
+.history/
+
+### VisualStudioCode Patch ###
+# Ignore all local history of files
+.history
+.ionide
+
 ### LaTeX ###
 ## Core latex/pdflatex auxiliary files:
 *.aux
