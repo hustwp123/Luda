@@ -1296,12 +1296,12 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
         if (compact->compaction->level() == 0) {
             sort.AddL0(p->all_kv_, p->h_skv_);
         } else {
-            sort.AddLow(p->all_kv_, p->h_skv_);
+            sort.AddLow(p->all_kv_, p->h_skv_,p->d_skv_);
         }
         delete p;
     }
     for (auto &p : high_decode) { 
-        sort.AddHigh(p->all_kv_, p->h_skv_); 
+        sort.AddHigh(p->all_kv_, p->h_skv_,p->d_skv_); 
         delete p;
     }
     IMM_WRITE();

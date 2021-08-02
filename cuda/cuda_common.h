@@ -359,16 +359,20 @@ public:
         l0_skvs_.push_back(skv);
     }
 
-     void AddLow(int size, SST_kv* skv) {
+     void AddLow(int size, SST_kv* skv, SST_kv* skv2=nullptr) {
         low_sizes_.push_back(size);
         low_idx_.push_back(0);
         low_skvs_.push_back(skv);
+        if(skv2)
+        low_skvs_2.push_back(skv2);
     }
 
-     void AddHigh(int size, SST_kv* skv) {
+     void AddHigh(int size, SST_kv* skv,SST_kv* skv2=nullptr) {
         high_sizes_.push_back(size);
         high_idx_.push_back(0);
         high_skvs_.push_back(skv);
+        if(skv2)
+        high_skvs_2.push_back(skv2);
     }
 
      void WpSort();
@@ -396,9 +400,13 @@ private:
     std::vector<int>     low_idx_;
     std::vector<SST_kv*> low_skvs_;
 
+    std::vector<SST_kv*> low_skvs_2;
+
     std::vector<int>     high_sizes_;
     std::vector<int>     high_idx_;
     std::vector<SST_kv*> high_skvs_;
+
+    std::vector<SST_kv*> high_skvs_2;
 
     int low_sst_index_;     // low level first SST
     int high_sst_index_;    // high level first SST

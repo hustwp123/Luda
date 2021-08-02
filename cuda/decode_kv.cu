@@ -727,38 +727,28 @@ public:
     size_t size_;
 };
 
-
+standard_context_t context;
 void SSTSort::WpSort() {
-    standard_context_t context;
+    
     Slice low_key, high_key, last_user_key;
     uint64_t last_seq = kMaxSequenceNumber;
     std::vector<WpSlice> low,high;
-    for(int i=0;i<low_skvs_.size();i++)
+    for(int i=0;i<low_skvs_2.size();i++)
     {
-        SST_kv *pskv=low_skvs_[i];
+        SST_kv *pskv=low_skvs_2[i];
+        SST_kv *pskv2=low_skvs_[i];
         for(int skv_idx=0;skv_idx<low_sizes_[i];skv_idx++)
         {
             //WpSlice(const char *d, size_t n, uint32_t off, int len) : data_(d), size_(n), offset_(off), value_len_(len) {}
             WpSlice temp;
 
-            temp.data_=(char*)context.alloc(sizeof(char) * pskv[skv_idx].key_size, memory_space_device);
-            cudaError_t result=htod(temp.data_,pskv[skv_idx].ikey,pskv[skv_idx].key_size);
-            if(cudaSuccess != result) throw cuda_exception_t(result);
+            // temp.data_=(char*)context.alloc(sizeof(char) * pskv[skv_idx].key_size, memory_space_device);
+            // cudaError_t result=htod(temp.data_,pskv[skv_idx].ikey,pskv[skv_idx].key_size);
+            // if(cudaSuccess != result) throw cuda_exception_t(result);
 
-            //temp.data(pskv[skv_idx].key_size,context);
-            //cudaError_t result=htod(temp.data.data(),pskv[skv_idx].ikey,pskv[skv_idx].key_size);
-            //temp.data_=temp.data.data();
-            //if(cudaSuccess != result) throw cuda_exception_t(result);
-            // if(pskv[skv_idx].key_size>200)
-            // {
-            //     fprintf(stderr,"key size too large\n");
-            //     exit(-1);
-            // }
-            // for(int k=0;k<pskv[skv_idx].key_size;k++)
-            // {
-            //     temp.data_[k]=pskv[skv_idx].ikey[k];
-            // }
-            temp.data2=pskv[skv_idx].ikey;
+            temp.data_=pskv[skv_idx].ikey;
+            temp.data2=pskv2[skv_idx].ikey;
+
             temp.size_=pskv[skv_idx].key_size;
             temp.offset_=pskv[skv_idx].value_offset;
             temp.value_len_=pskv[skv_idx].value_size;
@@ -768,25 +758,19 @@ void SSTSort::WpSort() {
     }
     for(int i=0;i<high_skvs_.size();i++)
     {
-        SST_kv *pskv=high_skvs_[i];
+        SST_kv *pskv=high_skvs_2[i];
+        SST_kv *pskv2=high_skvs_[i];
         for(int skv_idx=0;skv_idx<high_sizes_[i];skv_idx++)
         {
             WpSlice temp;
 
-            temp.data_=(char*)context.alloc(sizeof(char) * pskv[skv_idx].key_size, memory_space_device);
-            cudaError_t result=htod(temp.data_,pskv[skv_idx].ikey,pskv[skv_idx].key_size);
-            if(cudaSuccess != result) throw cuda_exception_t(result);
+            // temp.data_=(char*)context.alloc(sizeof(char) * pskv[skv_idx].key_size, memory_space_device);
+            // cudaError_t result=htod(temp.data_,pskv[skv_idx].ikey,pskv[skv_idx].key_size);
+            // if(cudaSuccess != result) throw cuda_exception_t(result);
 
-            // if(pskv[skv_idx].key_size>200)
-            // {
-            //     fprintf(stderr,"key size too large\n");
-            //     exit(-1);
-            // }
-            // for(int k=0;k<pskv[skv_idx].key_size;k++)
-            // {
-            //     temp.data_[k]=pskv[skv_idx].ikey[k];
-            // }
-            temp.data2=pskv[skv_idx].ikey;
+            temp.data_=pskv[skv_idx].ikey;
+            temp.data2=pskv2[skv_idx].ikey;
+
             temp.size_=pskv[skv_idx].key_size;
             temp.offset_=pskv[skv_idx].value_offset;
             temp.value_len_=pskv[skv_idx].value_size;
@@ -832,27 +816,27 @@ void SSTSort::WpSort() {
         }
 
     }
-    for(int i=0;i<low.size();i++)
-    {
-        if(low[i].data_) 
-            context.free(low[i].data_, memory_space_device);
-    }
+    // for(int i=0;i<low.size();i++)
+    // {
+    //     if(low[i].data_) 
+    //         context.free(low[i].data_, memory_space_device);
+    // }
 
-    for(int i=0;i<high.size();i++)
-    {
-        if(high[i].data_) 
-            context.free(high[i].data_, memory_space_device);
-    }
+    // for(int i=0;i<high.size();i++)
+    // {
+    //     if(high[i].data_) 
+    //         context.free(high[i].data_, memory_space_device);
+    // }
         
 }
 
 __host__
 void SSTSort::Sort() {
-    // if(l0_skvs_.empty())
-    // {
-    //     WpSort();
-    //     return;
-    // }
+    if(l0_skvs_.empty())
+    {
+        WpSort();
+        return;
+    }
 
     Slice low_key, high_key, last_user_key;
     uint64_t last_seq = kMaxSequenceNumber;
