@@ -1278,7 +1278,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 
     // Encode AND Sort
     gpu::SSTCompactionUtil util(compact->compaction->input_version_, compact->compaction->level());
-    gpu::SSTSort sort(compact->smallest_snapshot, m_.h_skv_sorted, &util);
+    gpu::SSTSort sort(compact->smallest_snapshot, m_.h_skv_sorted, &util,m_.d_skv_sorted);
 
     for (auto &p : low_decode ) { p->DoDecode(); }
     for (auto &p : high_decode) { p->DoDecode(); }
@@ -1319,7 +1319,14 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     //printf("Sort time:%ld ", duration);
 
     //Encode
-    gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_, sizeof(gpu::SST_kv) * sort.out_size_);
+    //gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_, sizeof(gpu::SST_kv) * sort.out_size_);
+
+    if(compact->compaction->level() == 0)
+    {
+      //Encode
+      gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_, sizeof(gpu::SST_kv) * sort.out_size_);
+    }
+    
 
     int last_keys = sort.out_size_;
     int keys_per_SST = gpu::kSharedKeys * gpu::kSharedPerSST;

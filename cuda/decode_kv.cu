@@ -664,28 +664,8 @@ Slice SSTSort::FindL0Smallest() {
 
 class WpSlice {
 public:  
-    //WpSlice() : data_(""), size_(0) {}
-    // WpSlice(const char *d, size_t n) : data_(d), size_(n) {}
-    //WpSlice(const char *d, size_t n, uint32_t off, int len) : data_(d), size_(n), offset_(off), value_len_(len) {}
-   // WpSlice(const char *s) : data_(s), size_(strlen(s)) {}
-    // WpSlice(const WpSlice &) = default;
-    // WpSlice &operator=(const WpSlice &) = default;  
-    // const char *data() const { return data_; }
-    // size_t size() const { return size_; }
-    // bool empty() const { return size_ == 0; }
-    
-    // // Change this slice to refer to an empty array
-     
-    // void clear() {
-    //     data_ = "";
-    //     size_ = 0;
-    // }
-
-
     MGPU_HOST_DEVICE bool operator <(const WpSlice& b)
     {
-        //return offset_<b.offset_;
-
         size_t min_len=(size_ < b.size_) ? size_ : b.size_;
         min_len-=8;
         for(int i=0;i<min_len;i++)
@@ -707,9 +687,6 @@ public:
         {
             return false;
         }
-        // return true;
-
-
         uint64_t anum,bnum;
         Memcpy((char*)&anum,data_+size_-8,sizeof(anum));
         Memcpy((char*)&bnum,b.data_+b.size_-8,sizeof(bnum));
@@ -719,8 +696,6 @@ public:
 public:
     uint32_t offset_;
     int value_len_;
-
-    //mem_t<char> data;
     char *data_;
     char *data2;
 
@@ -728,75 +703,96 @@ public:
 };
 
 standard_context_t context;
-void SSTSort::WpSort() {
-    
-    Slice low_key, high_key, last_user_key;
+MGPU_HOST_DEVICE int WpMerge(WpSlice *low,WpSlice * high,int lowSize,int highSize,SST_kv * out,uint64_t seq_)
+{
+    WpSlice last_user_key;
     uint64_t last_seq = kMaxSequenceNumber;
-    std::vector<WpSlice> low,high;
-    for(int i=0;i<low_skvs_2.size();i++)
+    last_user_key.size_=0;
+    int low_index=0;
+    int high_index=0;
+    bool isLow=false;
+    bool isHigh=false;
+    int out_size_=0;
+    while(true)
     {
-        SST_kv *pskv=low_skvs_2[i];
-        SST_kv *pskv2=low_skvs_[i];
-        for(int skv_idx=0;skv_idx<low_sizes_[i];skv_idx++)
+        if(isLow)
         {
-            //WpSlice(const char *d, size_t n, uint32_t off, int len) : data_(d), size_(n), offset_(off), value_len_(len) {}
-            WpSlice temp;
-
-            // temp.data_=(char*)context.alloc(sizeof(char) * pskv[skv_idx].key_size, memory_space_device);
-            // cudaError_t result=htod(temp.data_,pskv[skv_idx].ikey,pskv[skv_idx].key_size);
-            // if(cudaSuccess != result) throw cuda_exception_t(result);
-
-            temp.data_=pskv[skv_idx].ikey;
-            temp.data2=pskv2[skv_idx].ikey;
-
-            temp.size_=pskv[skv_idx].key_size;
-            temp.offset_=pskv[skv_idx].value_offset;
-            temp.value_len_=pskv[skv_idx].value_size;
-            low.push_back(temp);
-            //low.push_back(WpSlice(pskv[skv_idx].ikey, pskv[skv_idx].key_size, pskv[skv_idx].value_offset, pskv[skv_idx].value_size));
+            low_index++;
         }
-    }
-    for(int i=0;i<high_skvs_.size();i++)
-    {
-        SST_kv *pskv=high_skvs_2[i];
-        SST_kv *pskv2=high_skvs_[i];
-        for(int skv_idx=0;skv_idx<high_sizes_[i];skv_idx++)
+        if(isHigh)
         {
-            WpSlice temp;
-
-            // temp.data_=(char*)context.alloc(sizeof(char) * pskv[skv_idx].key_size, memory_space_device);
-            // cudaError_t result=htod(temp.data_,pskv[skv_idx].ikey,pskv[skv_idx].key_size);
-            // if(cudaSuccess != result) throw cuda_exception_t(result);
-
-            temp.data_=pskv[skv_idx].ikey;
-            temp.data2=pskv2[skv_idx].ikey;
-
-            temp.size_=pskv[skv_idx].key_size;
-            temp.offset_=pskv[skv_idx].value_offset;
-            temp.value_len_=pskv[skv_idx].value_size;
-            high.push_back(temp);
-            //high.push_back(WpSlice(pskv[skv_idx].ikey, pskv[skv_idx].key_size, pskv[skv_idx].value_offset, pskv[skv_idx].value_size));
+            high_index++;
         }
-    }
-    mem_t<WpSlice> a = to_mem(low,context);
-    mem_t<WpSlice> b = to_mem(high,context);
-    mem_t<WpSlice> c(low.size()+high.size(), context);
-    merge(a.data(), low.size(), b.data(), high.size(), c.data(), 
-      mgpu::less_t<WpSlice>(), context);
-    std::vector<WpSlice> c_host = from_mem(c);
-
-
-    for(WpSlice& i : c_host)
-    {
-        bool drop = false;
-        Slice low_key=Slice(i.data2,i.size_,i.offset_,i.value_len_);
-        Slice min_user_key(low_key.data(), low_key.size() - 8);
-        if (!last_user_key.empty() && last_user_key.compare(min_user_key) != 0) {
-            //last_user_key = min_user_key;
-            last_seq = kMaxSequenceNumber;
+        if(low_index>=lowSize&&high_index>=highSize)
+        {
+            break;
         }
-        last_user_key = min_user_key;
-        uint64_t inum = DecodeFixed64(low_key.data() + low_key.size() - 8);
+        else if(low_index<lowSize&&high_index<highSize)
+        {
+            if(low[low_index]<high[high_index])
+            {
+                isLow=true;
+                isHigh=false;
+            }
+            else
+            {
+                isLow=false;
+                isHigh=true;
+            }
+        }
+        else if(low_index<lowSize)
+        {
+            isLow=true;
+            isHigh=false;
+        }
+        else
+        {
+            isLow=false;
+            isHigh=true;
+        }
+        bool drop=false;
+        WpSlice low_key;
+        if(isLow)
+        {
+            low_key.data_=low[low_index].data_;
+            low_key.data2=low[low_index].data2;
+            low_key.size_=low[low_index].size_;
+            low_key.offset_=low[low_index].offset_;
+            low_key.value_len_=low[low_index].value_len_;
+        }
+        else
+        {
+            low_key.data_=high[high_index].data_;
+            low_key.data2=high[high_index].data2;
+            low_key.size_=high[high_index].size_;
+            low_key.offset_=high[high_index].offset_;
+            low_key.value_len_=high[high_index].value_len_;
+        }
+        if(last_user_key.size_!=0)
+        {
+            if(last_user_key.size_!=low_key.size_)
+            {
+                last_seq = kMaxSequenceNumber;
+            }
+            else
+            {
+                for(int i=0;i<last_user_key.size_-8;i++)
+                {
+                    if(last_user_key.data_[i]!=low_key.data_[i])
+                    {
+                        last_seq = kMaxSequenceNumber;
+                        break;
+                    }
+                }
+            }
+        }
+        last_user_key.data_=low_key.data_;
+        last_user_key.data2=low_key.data2;
+        last_user_key.size_=low_key.size_;
+        last_user_key.offset_=low_key.offset_;
+        last_user_key.value_len_=low_key.value_len_;
+        uint64_t inum;
+        Memcpy((char*)&inum,low_key.data_+low_key.size_-8,sizeof(inum));
         uint64_t iseq = inum >> 8;
         uint8_t  itype = inum & 0xff;
         if (last_seq <= seq_) {
@@ -805,29 +801,66 @@ void SSTSort::WpSort() {
             drop = true;
         }
         last_seq = iseq;
-        // 3. Write KV to out_
-        if (!drop) {
-           Memcpy(out_[out_size_].ikey, low_key.data(), low_key.size());
-           out_[out_size_].key_size = low_key.size();
-           out_[out_size_].value_size = low_key.value_len_;
-           out_[out_size_].value_offset = low_key.offset_;
+        if(!drop&&out)
+        {
+           Memcpy(out[out_size_].ikey, low_key.data_, low_key.size_);
+           out[out_size_].key_size = low_key.size_;
+           out[out_size_].value_size = low_key.value_len_;
+           out[out_size_].value_offset = low_key.offset_;
 
            ++ out_size_;
         }
-
     }
-    // for(int i=0;i<low.size();i++)
-    // {
-    //     if(low[i].data_) 
-    //         context.free(low[i].data_, memory_space_device);
-    // }
+    return out_size_;
+}
 
-    // for(int i=0;i<high.size();i++)
-    // {
-    //     if(high[i].data_) 
-    //         context.free(high[i].data_, memory_space_device);
-    // }
-        
+void SSTSort::WpSort() {
+    Slice low_key, high_key, last_user_key;
+    uint64_t last_seq = kMaxSequenceNumber;
+    std::vector<WpSlice> low(low_kvs),high(high_kvs);
+    int low_index=0;
+    int high_index=0;
+    for(int i=0;i<low_skvs_2.size();i++)
+    {
+        SST_kv *pskv=low_skvs_2[i];
+        SST_kv *pskv2=low_skvs_[i];
+        for(int skv_idx=0;skv_idx<low_sizes_[i];skv_idx++)
+        {
+            low[low_index].data_=pskv[skv_idx].ikey;
+            low[low_index].data2=pskv2[skv_idx].ikey;
+
+            low[low_index].size_=pskv[skv_idx].key_size;
+            low[low_index].offset_=pskv[skv_idx].value_offset;
+            low[low_index].value_len_=pskv[skv_idx].value_size;
+            low_index++;
+        }
+    }
+    for(int i=0;i<high_skvs_.size();i++)
+    {
+        SST_kv *pskv=high_skvs_2[i];
+        SST_kv *pskv2=high_skvs_[i];
+        for(int skv_idx=0;skv_idx<high_sizes_[i];skv_idx++)
+        {
+            high[high_index].data_=pskv[skv_idx].ikey;
+            high[high_index].data2=pskv2[skv_idx].ikey;
+
+            high[high_index].size_=pskv[skv_idx].key_size;
+            high[high_index].offset_=pskv[skv_idx].value_offset;
+            high[high_index].value_len_=pskv[skv_idx].value_size;
+            high_index++;
+        }
+    }
+    WpSlice* atest;
+    WpSlice* btest;
+    cudaMallocHost((void **)&atest, sizeof(WpSlice) * low.size());
+    cudaMallocHost((void **)&btest, sizeof(WpSlice) * high.size());
+    gpu::cudaMemHtD(atest, low.data(), sizeof(WpSlice) * low.size());
+    gpu::cudaMemHtD(btest, high.data(), sizeof(WpSlice) * high.size());
+    int num=WpMerge(atest,btest,low.size(),high.size(),d_kvs_,seq_);
+    cudaFreeHost(atest);
+    cudaFreeHost(btest);
+    gpu::cudaMemDtH(out_, d_kvs_, sizeof(gpu::SST_kv) * num);
+    out_size_=num;
 }
 
 __host__

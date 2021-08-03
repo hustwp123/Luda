@@ -346,10 +346,10 @@ private:
 class SSTSort {
 public:
     enum SSTSortType {enNULL = -1, enL0 = 5, enLow = 8, enHigh = 10};
-     SSTSort(uint64_t seq, SST_kv* out, SSTCompactionUtil* util):
+     SSTSort(uint64_t seq, SST_kv* out, SSTCompactionUtil* util,SST_kv *d_kv=nullptr):
             seq_(seq), witch_(enNULL), l0_sst_index_(-1), util_(util),
             out_(out), out_size_(0), key_(),
-            low_sst_index_(0), high_sst_index_(0) {}
+            low_sst_index_(0), high_sst_index_(0),d_kvs_(d_kv) {}
 
      ~SSTSort() {}
 
@@ -364,7 +364,11 @@ public:
         low_idx_.push_back(0);
         low_skvs_.push_back(skv);
         if(skv2)
-        low_skvs_2.push_back(skv2);
+        {
+            low_skvs_2.push_back(skv2);
+            low_kvs+=size;
+        }
+        
     }
 
      void AddHigh(int size, SST_kv* skv,SST_kv* skv2=nullptr) {
@@ -372,7 +376,11 @@ public:
         high_idx_.push_back(0);
         high_skvs_.push_back(skv);
         if(skv2)
-        high_skvs_2.push_back(skv2);
+        {
+            high_skvs_2.push_back(skv2);
+            high_kvs+=size;
+        }
+        
     }
 
      void WpSort();
@@ -399,12 +407,14 @@ private:
     std::vector<int>     low_sizes_;
     std::vector<int>     low_idx_;
     std::vector<SST_kv*> low_skvs_;
+    int low_kvs=0;
 
     std::vector<SST_kv*> low_skvs_2;
 
     std::vector<int>     high_sizes_;
     std::vector<int>     high_idx_;
     std::vector<SST_kv*> high_skvs_;
+    int high_kvs=0;
 
     std::vector<SST_kv*> high_skvs_2;
 
@@ -417,6 +427,8 @@ private:
 public:
     SST_kv *out_;           // 最后输出已经排好序的KV
     int out_size_;          // KV总个数
+
+    SST_kv *d_kvs_;
 };
 
 class SSTEncode {
