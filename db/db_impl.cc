@@ -1279,38 +1279,103 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     // Encode AND Sort
     gpu::SSTCompactionUtil util(compact->compaction->input_version_, compact->compaction->level());
     gpu::SSTSort sort(compact->smallest_snapshot, m_.h_skv_sorted, &util,m_.d_skv_sorted);
+    bool useWP=(compact->compaction->level() != 0);
+    //bool useWP=false;
+    int low_kvs=0;
+    int high_kvs=0;
 
-    for (auto &p : low_decode ) { p->DoDecode(); }
-    for (auto &p : high_decode) { p->DoDecode(); }
+    for (auto &p : low_decode ) {
+       p->DoDecode(); 
+       low_kvs+=p->all_kv_;
+    }
+    for (auto &p : high_decode) {
+       p->DoDecode();
+       high_kvs+=p->all_kv_; 
+    }
     IMM_WRITE();
-
-    for (auto &p : low_decode ) { p->DoGPUDecode_1(); }
-    for (auto &p : high_decode) { p->DoGPUDecode_1(); }
+    if(useWP)
+    {
+      //printf("alloc1 size: %d\n",low_kvs);
+      sort.AllocLow(low_kvs);
+      //printf("alloc2 size:%d\n",high_kvs);
+      sort.AllocHigh(high_kvs);
+      //printf("end\n");
+      sort.num=low_kvs+high_kvs;
+      sort.low_num=low_kvs;
+      sort.high_num=high_kvs;
+    }
+    int low_index=0;
+    int high_index=0;
+    for (auto &p : low_decode ) {
+      if(useWP)
+      {
+        p->DoGPUDecode_1(sort.low_slices+low_index); 
+        low_index+=p->all_kv_;
+      }
+      else
+      {
+        p->DoGPUDecode_1();
+      }
+       
+    }
+    for (auto &p : high_decode) {
+      if(useWP)
+      {
+        p->DoGPUDecode_1(sort.high_slices+high_index);
+        high_index+=p->all_kv_; 
+      }
+      else
+      {
+        p->DoGPUDecode_1();
+      }
+       
+    }
     IMM_WRITE();
 
     for (auto &p : low_decode ) { p->DoGPUDecode_2(); }
     for (auto &p : high_decode) { p->DoGPUDecode_2(); }
     IMM_WRITE();
 
-    for (auto &p : low_decode ) {
+    if(!useWP)
+    {
+      for (auto &p : low_decode ) {
         if (compact->compaction->level() == 0) {
             sort.AddL0(p->all_kv_, p->h_skv_);
         } else {
             sort.AddLow(p->all_kv_, p->h_skv_,p->d_skv_);
         }
         delete p;
-    }
-    for (auto &p : high_decode) { 
+      }
+      for (auto &p : high_decode) { 
         sort.AddHigh(p->all_kv_, p->h_skv_,p->d_skv_); 
         delete p;
+      }
     }
+    else
+    {
+      for (auto &p : low_decode ) {
+        delete p;
+      }
+      for (auto &p : high_decode) { 
+        delete p;
+      }
+    }
+    
     IMM_WRITE();
 
     duration = (env_->NowMicros() - compaction_start);
     compaction_start = env_->NowMicros();
     //printf("decode time:%ld ", duration);
 
-    sort.Sort();
+    if(useWP)
+    {
+      sort.WpSort();
+    }
+    else
+    {
+      sort.Sort();
+    }
+    
 
     IMM_WRITE();
 
@@ -1321,7 +1386,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     //Encode
     //gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_, sizeof(gpu::SST_kv) * sort.out_size_);
 
-    if(compact->compaction->level() == 0)
+    if(!useWP)
     {
       //Encode
       gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_, sizeof(gpu::SST_kv) * sort.out_size_);

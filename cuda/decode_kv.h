@@ -19,7 +19,7 @@ namespace gpu {
 // 统一负责主机与设备的内存的申请与释放
 // 大致内存最多等于 SST_SIZE * 25 / SST_SIZE * 25 * 2
 __global__
-void GPUDecodeKernel(char **SST, int SSTIdx, GDI *gdi, int gdi_cnt, SST_kv *skv);
+void GPUDecodeKernel(char **SST, int SSTIdx, GDI *gdi, int gdi_cnt, SST_kv *skv,WpSlice* slices=nullptr,int index=0);
 
 
 // 对生成的KeyValue进行每16(kv_count)个一组进行前缀压缩

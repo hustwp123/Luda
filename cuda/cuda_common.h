@@ -25,12 +25,26 @@
 namespace leveldb {
 namespace gpu {
 
+
 enum {
     kKeyBufferSize = 32,    // KEY 占用的最大Size（包括8字节）
     kSharedKeys = K_SHARED_KEYS,       // 每个SharedBlock中Key的数目
     kDataSharedCnt = 4,     // 每个DataBlock中SharedBlock的数目
     kBitsPerKey = 10,       // filter时候，每个Key所用bit位数
     kSharedPerSST = __SST_SIZE / __MIN_KEY_SIZE / kSharedKeys - 100,    // 每个SST中有多少个SharedBlock
+};
+
+class WpSlice {
+public:  
+    bool operator <(const WpSlice& b);
+
+public:
+    uint32_t offset_;
+    int value_len_;
+    char *data_;
+    char *data2;
+
+    size_t size_;
 };
 
 class Stream {
@@ -285,7 +299,7 @@ public:
      void DoGPUDecode();
 
      // Async Decode
-     void DoGPUDecode_1();
+     void DoGPUDecode_1(WpSlice* slices=nullptr,int index=0);
      void DoGPUDecode_2();
 
     int all_kv_;
@@ -429,6 +443,17 @@ public:
     int out_size_;          // KV总个数
 
     SST_kv *d_kvs_;
+    WpSlice* low_slices=nullptr;
+    WpSlice* high_slices=nullptr;
+    int num;
+    int low_num;
+    int high_num;
+    int low_index=0;
+    int high_index=0;
+    void AddLowSlice(int size, SST_kv* skv);
+    void AddHighSlice(int size, SST_kv* skv);
+    void AllocLow(int size);
+    void AllocHigh(int size);
 };
 
 class SSTEncode {
