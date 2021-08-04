@@ -1330,23 +1330,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
       }
        
     }
-    // if(useWP)
-    // {
-    //   for(int i=0;i<sort.low_num;i++)
-    //   {
-    //     if(sort.low_slices[i].data_==nullptr)
-    //     {
-    //       printf("error1 i==%d size==%d\n",i,sort.low_slices[i].size_);
-    //     }
-    //   }
-    //   for(int i=0;i<sort.high_num;i++)
-    //   {
-    //     if(sort.high_slices[i].data_==nullptr)
-    //     {
-    //       printf("error2 i==%d size==%d offset_:%d len:%d \n",i,sort.high_slices[i].size_,sort.high_slices[i].offset_,sort.high_slices[i].value_len_);
-    //     }
-    //   }
-    // }
     
     IMM_WRITE();
 
