@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "/home/wp/moderngpu/src/moderngpu/kernel_merge.hxx"
+#include "/home/wp/moderngpu/src/moderngpu/kernel_mergesort.hxx"
 
 #define M (512 * (__SST_SIZE / (1024 * 1024 * 4)))
 #define N (32)
@@ -93,6 +94,13 @@ HostAndDeviceMemory::HostAndDeviceMemory() {
         d_fmeta.push_back(pd_fm);
     }
 
+    low_size=50000;
+    high_size=150000;
+    result_size=200000;
+    cudaMallocHost((void **)&lowSlices, sizeof(WpSlice) * low_size);
+    cudaMallocHost((void **)&highSlices, sizeof(WpSlice) * high_size);
+    cudaMallocHost((void **)&resultSlice, sizeof(WpSlice) * result_size);
+
     // 排序好的空间申请
     h_skv_sorted = (SST_kv *)malloc(sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
     cudaMallocHost((void **)&d_skv_sorted, sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
@@ -127,6 +135,11 @@ HostAndDeviceMemory::~HostAndDeviceMemory() {
     }
 
     free(h_skv_sorted);
+
+    cudaFreeHost(lowSlices);
+    cudaFreeHost(highSlices);
+    cudaFreeHost(resultSlice);
+
     cudaFreeHost(d_skv_sorted);
     cudaFreeHost(d_skv_sorted_shared);
 }
@@ -685,62 +698,119 @@ Slice SSTSort::FindL0Smallest() {
     return min_key;
 }
 
-MGPU_HOST_DEVICE bool WpSlice::operator <(const WpSlice& b)
+MGPU_HOST_DEVICE bool WpSlice::operator <(WpSlice& b)
 {
-    if(skv&&b.skv)
+    uint64_t anum,bnum;
+    Memcpy((char*)&anum,skv->ikey+skv->key_size-8,sizeof(anum));
+    Memcpy((char*)&bnum,b.skv->ikey+b.skv->key_size-8,sizeof(bnum));
+    uint64_t aseq=anum>>8;
+    uint8_t atype=bnum&0xff;
+    uint64_t bseq=bnum>>8;
+    uint8_t btype=bnum&0xff;
+    if(atype==kTypeDeletion&&aseq<=seq_)
     {
-        size_t min_len=(skv->key_size < b.skv->key_size) ? skv->key_size : b.skv->key_size;
-        min_len-=8;
-        for(int i=0;i<min_len;i++)
-        {
-            if(skv->ikey[i]<b.skv->ikey[i])
-            {
-                return true;
-            }
-            if(skv->ikey[i]>b.skv->ikey[i])
-            {
-                return false;
-            }
-        }
-        if(skv->key_size<b.skv->key_size)
-        {
-            return true;
-        }
-        if(skv->key_size>b.skv->key_size)
-        {
-            return false;
-        }
-        uint64_t anum,bnum;
-        Memcpy((char*)&anum,skv->ikey+skv->key_size-8,sizeof(anum));
-        Memcpy((char*)&bnum,b.skv->ikey+b.skv->key_size-8,sizeof(bnum));
-        return anum<bnum;
+        drop=true;
     }
-    else if(!skv)
+    if(btype==kTypeDeletion&&bseq<=seq_)
+    {
+        b.drop=true;
+    }
+    if(drop||b.drop)
     {
         return true;
     }
-    else
+    size_t min_len=(skv->key_size < b.skv->key_size) ? skv->key_size : b.skv->key_size;
+    min_len-=8;
+    for(int i=0;i<min_len;i++)
+    {
+        if(skv->ikey[i]<b.skv->ikey[i])
+        {
+            return true;
+        }
+        if(skv->ikey[i]>b.skv->ikey[i])
+        {
+            return false;
+        }
+    }
+    if(skv->key_size<b.skv->key_size)
+    {
+        return true;
+    }
+    if(skv->key_size>b.skv->key_size)
     {
         return false;
     }
+    // uint64_t anum,bnum;
+    // Memcpy((char*)&anum,skv->ikey+skv->key_size-8,sizeof(anum));
+    // Memcpy((char*)&bnum,b.skv->ikey+b.skv->key_size-8,sizeof(bnum));
+    
+    return anum<bnum;
+
     
 }
-void SSTSort::AllocLow(int size)
+void SSTSort::AllocLow(int size,HostAndDeviceMemory* m)
 {
-    cudaMallocHost((void **)&low_slices, sizeof(WpSlice) * size);
-    if(low_slices==nullptr&&size!=0)
+    if(size<=m->low_size)
     {
-        printf("error1\n");
-        exit(-1);
+        low_slices=m->lowSlices;
+    }
+    else
+    {
+        cudaFreeHost(m->lowSlices);
+        cudaMallocHost((void **)&(m->lowSlices), sizeof(WpSlice) * size);
+        m->low_size=size;
+        low_slices=m->lowSlices;
+    }
+    // cudaMallocHost((void **)&low_slices, sizeof(WpSlice) * size);
+    // if(low_slices==nullptr&&size!=0)
+    // {
+    //     printf("error1\n");
+    //     exit(-1);
+    // }
+    for(int i=0;i<size;i++)
+    {
+        low_slices[i].drop=false;
+        low_slices[i].seq_=seq_;
     }
 }
-void SSTSort::AllocHigh(int size)
+void SSTSort::AllocHigh(int size,HostAndDeviceMemory* m)
 {
-    cudaMallocHost((void **)&high_slices, sizeof(WpSlice) * size);
-    if(high_slices==nullptr&&size!=0)
+    if(size<=m->high_size)
     {
-        printf("error2\n");
-        exit(-1);
+        high_slices=m->highSlices;
+    }
+    else
+    {
+        cudaFreeHost(m->highSlices);
+        cudaMallocHost((void **)&(m->highSlices), sizeof(WpSlice) * size);
+        m->high_size=size;
+        high_slices=m->highSlices;
+    }
+    // cudaMallocHost((void **)&high_slices, sizeof(WpSlice) * size);
+    // if(high_slices==nullptr&&size!=0)
+    // {
+    //     printf("error2\n");
+    //     exit(-1);
+    // }
+    for(int i=0;i<size;i++)
+    {
+        high_slices[i].drop=false;
+        high_slices[i].seq_=seq_;
+    }
+}
+
+void SSTSort::AllocResult(int size,HostAndDeviceMemory* m)
+{
+    if(size<=m->result_size)
+    {
+        result_slices=m->resultSlice;
+    }
+    else
+    {
+        cudaFreeHost(m->resultSlice);
+        cudaMallocHost((void **)&(m->resultSlice), sizeof(WpSlice) * size);
+        m->result_size=size;
+        result_slices=m->resultSlice;
     }
 }
 
@@ -749,14 +819,16 @@ void SSTSort::WpSort() {
     WpSlice last_user_key;
     last_user_key.skv=nullptr;
     uint64_t last_seq = kMaxSequenceNumber;
-    WpSlice* c=nullptr;
+    //WpSlice* c=nullptr;
     WpSlice* ctest=nullptr;
+    // mergesort(low_slices, low_num, less_t<WpSlice>(), context);
+    // mergesort(high_slices, high_num, less_t<WpSlice>(), context);
     if(low_num!=0&&high_num!=0)
     {
-        cudaMallocHost((void **)&c, sizeof(WpSlice) * num);
-        merge(low_slices, low_num, high_slices, high_num, c, 
+        //cudaMallocHost((void **)&c, sizeof(WpSlice) * num);
+        merge(low_slices, low_num, high_slices, high_num, result_slices, 
             mgpu::less_t<WpSlice>(), context);
-        ctest=c;
+        ctest=result_slices;
     }
     else if(high_num==0)
     {
@@ -771,7 +843,6 @@ void SSTSort::WpSort() {
         out_size_=0;
         return;
     }
-    
     // std::vector<WpSlice> c_host;
     // cudaError_t result = dtoh(c_host, ctest, num);
     // if(cudaSuccess != result) throw cuda_exception_t(result);
@@ -780,7 +851,15 @@ void SSTSort::WpSort() {
 
     for(int i=0;i<num;i++)
     {
-        bool drop=false;
+        if(c_host[i].drop)
+        {
+            continue;
+        }
+        bool drop=false;//=(c_host[i].drop==2);
+        // if(drop)
+        // {
+        //     continue;
+        // }
         if(last_user_key.skv)
         {
             if(last_user_key.skv->key_size!=c_host[i].skv->key_size)
@@ -800,15 +879,16 @@ void SSTSort::WpSort() {
             }
         }
         last_user_key.skv=c_host[i].skv;
-        uint64_t inum;
-        Memcpy((char*)&inum,c_host[i].skv->ikey+c_host[i].skv->key_size-8,sizeof(inum));
-        uint64_t iseq = inum >> 8;
-        uint8_t  itype = inum & 0xff;
+        // uint64_t inum;
+        // Memcpy((char*)&inum,c_host[i].skv->ikey+c_host[i].skv->key_size-8,sizeof(inum));
+        // uint64_t iseq = inum >> 8;
+        // uint8_t  itype = inum & 0xff;
         if (last_seq <= seq_) {
             drop = true;
-        } else if (itype == kTypeDeletion &&iseq <= seq_) {
-            drop = true;
-        }
+        } 
+        // else if (itype == kTypeDeletion &&iseq <= seq_) {
+        //     drop = true;
+        // }
         last_seq = iseq;
         if(!drop&&d_kvs_)
         {
@@ -820,20 +900,19 @@ void SSTSort::WpSort() {
            ++ out_size_;
         }
     }
-
     gpu::cudaMemDtH(out_, d_kvs_, sizeof(gpu::SST_kv) * num);
-    if(low_slices)
-    {
-        cudaFreeHost(low_slices);
-    }
-    if(high_slices)
-    {
-        cudaFreeHost(high_slices);
-    }
-    if(ctest)
-    {
-        cudaFreeHost(ctest);
-    }
+    // if(low_slices)
+    // {
+    //     cudaFreeHost(low_slices);
+    // }
+    // if(high_slices)
+    // {
+    //     cudaFreeHost(high_slices);
+    // }
+    // if(ctest)
+    // {
+    //     cudaFreeHost(ctest);
+    // }
     
 }
         

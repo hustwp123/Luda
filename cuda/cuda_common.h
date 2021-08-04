@@ -36,7 +36,7 @@ enum {
 struct SST_kv;
 class WpSlice {
 public:  
-    bool operator <(const WpSlice& b);
+    bool operator <(WpSlice& b);
 
 public:
     // uint32_t offset_;
@@ -47,8 +47,8 @@ public:
 
     SST_kv* skv;
 
-    // int drop;
-    // uint64_t seq_;
+    bool drop;   
+    uint64_t seq_;
 };
 
 class Stream {
@@ -269,6 +269,13 @@ public:
 
     std::vector<filter_meta *> h_fmeta;
     std::vector<filter_meta *> d_fmeta;
+
+    WpSlice* lowSlices;
+    int low_size;
+    WpSlice* highSlices;
+    int high_size;
+    WpSlice* resultSlice;
+    int result_size;
 };
 
 class SSTDecode {
@@ -449,6 +456,7 @@ public:
     SST_kv *d_kvs_;
     WpSlice* low_slices=nullptr;
     WpSlice* high_slices=nullptr;
+    WpSlice* result_slices=nullptr;
     int num;
     int low_num;
     int high_num;
@@ -456,8 +464,9 @@ public:
     int high_index=0;
     void AddLowSlice(int size, SST_kv* skv);
     void AddHighSlice(int size, SST_kv* skv);
-    void AllocLow(int size);
-    void AllocHigh(int size);
+    void AllocLow(int size,HostAndDeviceMemory* m);
+    void AllocHigh(int size,HostAndDeviceMemory* m);
+    void AllocResult(int size,HostAndDeviceMemory* m);
 };
 
 class SSTEncode {
