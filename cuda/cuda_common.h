@@ -33,7 +33,7 @@ enum {
     kBitsPerKey = 10,       // filter时候，每个Key所用bit位数
     kSharedPerSST = __SST_SIZE / __MIN_KEY_SIZE / kSharedKeys - 100,    // 每个SST中有多少个SharedBlock
 };
-
+struct SST_kv;
 class WpSlice {
 public:  
     bool operator <(const WpSlice& b);
@@ -42,9 +42,9 @@ public:
     uint32_t offset_;
     int value_len_;
     char *data_;
-    char *data2;
 
     size_t size_;
+    SST_kv* skv;
 };
 
 class Stream {

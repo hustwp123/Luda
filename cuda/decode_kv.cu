@@ -341,6 +341,8 @@ void GPUDecodeKernel(char **SST, int SSTIdx, GDI *gdi, int gdi_cnt, SST_kv *skv,
 
     if(slices)
     {
+        slices[cur->kv_base_idx].skv=pskv;
+
         slices[cur->kv_base_idx].data_=pskv->ikey;
         slices[cur->kv_base_idx].size_=pskv->key_size;
         slices[cur->kv_base_idx].offset_=pskv->value_offset;
@@ -367,6 +369,8 @@ void GPUDecodeKernel(char **SST, int SSTIdx, GDI *gdi, int gdi_cnt, SST_kv *skv,
 
         if(slices)
         {
+            slices[cur->kv_base_idx+kv_idx].skv=pskv;
+
             slices[cur->kv_base_idx+kv_idx].data_=pskv->ikey;
             slices[cur->kv_base_idx+kv_idx].size_=pskv->key_size;
             slices[cur->kv_base_idx+kv_idx].offset_=pskv->value_offset;
@@ -683,48 +687,72 @@ Slice SSTSort::FindL0Smallest() {
 
 MGPU_HOST_DEVICE bool WpSlice::operator <(const WpSlice& b)
 {
-    size_t min_len=(size_ < b.size_) ? size_ : b.size_;
-    min_len-=8;
-    for(int i=0;i<min_len;i++)
+    if(skv&&b.skv)
     {
-        if(data_[i]<b.data_[i])
+        size_t min_len=(skv->key_size < b.skv->key_size) ? skv->key_size : b.skv->key_size;
+        min_len-=8;
+        for(int i=0;i<min_len;i++)
+        {
+            if(skv->ikey[i]<b.skv->ikey[i])
+            {
+                return true;
+            }
+            if(skv->ikey[i]>b.skv->ikey[i])
+            {
+                return false;
+            }
+        }
+        if(skv->key_size<b.skv->key_size)
         {
             return true;
         }
-        if(data_[i]>b.data_[i])
+        if(skv->key_size>b.skv->key_size)
         {
             return false;
         }
+        uint64_t anum,bnum;
+        Memcpy((char*)&anum,skv->ikey+skv->key_size-8,sizeof(anum));
+        Memcpy((char*)&bnum,b.skv->ikey+b.skv->key_size-8,sizeof(bnum));
+        return anum<bnum;
     }
-    if(size_<b.size_)
+    else if(!skv)
     {
+        printf("get null1 data_==null:%d\n",data_==nullptr);
         return true;
     }
-    if(size_>b.size_)
+    else
     {
+        printf("get null2 data_==null:%d\n",b.data_==nullptr);
         return false;
     }
-    uint64_t anum,bnum;
-    Memcpy((char*)&anum,data_+size_-8,sizeof(anum));
-    Memcpy((char*)&bnum,b.data_+b.size_-8,sizeof(bnum));
-    return anum<bnum;
+    
 }
 void SSTSort::AllocLow(int size)
 {
-    cudaMalloc((void **)&low_slices, sizeof(WpSlice) * size);
+    cudaMallocHost((void **)&low_slices, sizeof(WpSlice) * size);
     if(low_slices==nullptr&&size!=0)
     {
         printf("error1\n");
         exit(-1);
     }
+    for(int i=0;i<size;i++)
+    {
+        low_slices[i].data_=nullptr;
+        low_slices[i].skv=nullptr;
+    }
 }
 void SSTSort::AllocHigh(int size)
 {
-    cudaMalloc((void **)&high_slices, sizeof(WpSlice) * size);
+    cudaMallocHost((void **)&high_slices, sizeof(WpSlice) * size);
     if(high_slices==nullptr&&size!=0)
     {
         printf("error2\n");
         exit(-1);
+    }
+    for(int i=0;i<size;i++)
+    {
+        high_slices[i].data_=nullptr;
+        high_slices[i].skv=nullptr;
     }
 }
 
@@ -733,62 +761,15 @@ void SSTSort::WpSort() {
     // assert(low_slices!=nullptr);
     // assert(high_slices!=nullptr);
     WpSlice last_user_key;
+    last_user_key.skv=nullptr;
     last_user_key.size_=0;
     uint64_t last_seq = kMaxSequenceNumber;
-    // std::vector<WpSlice> low,high;
-    // for(int i=0;i<low_skvs_2.size();i++)
-    // {
-    //     SST_kv *pskv=low_skvs_2[i];
-    //     SST_kv *pskv2=low_skvs_[i];
-    //     for(int skv_idx=0;skv_idx<low_sizes_[i];skv_idx++)
-    //     {
-    //         //WpSlice(const char *d, size_t n, uint32_t off, int len) : data_(d), size_(n), offset_(off), value_len_(len) {}
-    //         WpSlice temp;
-
-    //         // temp.data_=(char*)context.alloc(sizeof(char) * pskv[skv_idx].key_size, memory_space_device);
-    //         // cudaError_t result=htod(temp.data_,pskv[skv_idx].ikey,pskv[skv_idx].key_size);
-    //         // if(cudaSuccess != result) throw cuda_exception_t(result);
-
-    //         temp.data_=pskv[skv_idx].ikey;
-    //         temp.data2=pskv2[skv_idx].ikey;
-
-    //         temp.size_=pskv[skv_idx].key_size;
-    //         temp.offset_=pskv[skv_idx].value_offset;
-    //         temp.value_len_=pskv[skv_idx].value_size;
-    //         low.push_back(temp);
-    //     }
-    // }
-    // for(int i=0;i<high_skvs_.size();i++)
-    // {
-    //     SST_kv *pskv=high_skvs_2[i];
-    //     SST_kv *pskv2=high_skvs_[i];
-    //     for(int skv_idx=0;skv_idx<high_sizes_[i];skv_idx++)
-    //     {
-    //         WpSlice temp;
-
-    //         temp.data_=pskv[skv_idx].ikey;
-    //         temp.data2=pskv2[skv_idx].ikey;
-
-    //         temp.size_=pskv[skv_idx].key_size;
-    //         temp.offset_=pskv[skv_idx].value_offset;
-    //         temp.value_len_=pskv[skv_idx].value_size;
-    //         high.push_back(temp);
-    //     }
-    // }
-
-    // WpSlice* atest;
-    // WpSlice* btest;
-    // int num=low.size()+high.size();
-    // cudaMallocHost((void **)&atest, sizeof(WpSlice) * low.size());
-    // cudaMallocHost((void **)&btest, sizeof(WpSlice) * high.size());
-    // gpu::cudaMemHtD(atest, low.data(), sizeof(WpSlice) * low.size());
-    // gpu::cudaMemHtD(btest, high.data(), sizeof(WpSlice) * high.size());
 
     WpSlice* c=nullptr;
     WpSlice* ctest=nullptr;
     if(low_num!=0&&high_num!=0)
     {
-        cudaMalloc((void **)&c, sizeof(WpSlice) * num);
+        cudaMallocHost((void **)&c, sizeof(WpSlice) * num);
         merge(low_slices, low_num, high_slices, high_num, c, 
             mgpu::less_t<WpSlice>(), context);
         ctest=c;
@@ -810,20 +791,25 @@ void SSTSort::WpSort() {
     std::vector<WpSlice> c_host;
     cudaError_t result = dtoh(c_host, ctest, num);
     if(cudaSuccess != result) throw cuda_exception_t(result);
+
     for(int i=0;i<num;i++)
     {
-        bool drop=false;
-        if(last_user_key.size_!=0)
+        if(c_host[i].skv==nullptr)
         {
-            if(last_user_key.size_!=c_host[i].size_)
+            printf("get null\n");
+        }
+        bool drop=false;
+        if(last_user_key.skv)
+        {
+            if(last_user_key.skv->key_size!=c_host[i].skv->key_size)
             {
                 last_seq = kMaxSequenceNumber;
             }
             else
             {
-                for(int j=0;j<last_user_key.size_-8;j++)
+                for(int j=0;j<last_user_key.skv->key_size-8;j++)
                 {
-                    if(last_user_key.data_[j]!=c_host[i].data_[j])
+                    if(last_user_key.skv->ikey[j]!=c_host[i].skv->ikey[j])
                     {
                         last_seq = kMaxSequenceNumber;
                         break;
@@ -831,13 +817,9 @@ void SSTSort::WpSort() {
                 }
             }
         }
-        last_user_key.data_=c_host[i].data_;
-        last_user_key.data2=c_host[i].data2;
-        last_user_key.size_=c_host[i].size_;
-        last_user_key.offset_=c_host[i].offset_;
-        last_user_key.value_len_=c_host[i].value_len_;
+        last_user_key.skv=c_host[i].skv;
         uint64_t inum;
-        Memcpy((char*)&inum,c_host[i].data_+c_host[i].size_-8,sizeof(inum));
+        Memcpy((char*)&inum,c_host[i].skv->ikey+c_host[i].skv->key_size-8,sizeof(inum));
         uint64_t iseq = inum >> 8;
         uint8_t  itype = inum & 0xff;
         if (last_seq <= seq_) {
@@ -848,25 +830,71 @@ void SSTSort::WpSort() {
         last_seq = iseq;
         if(!drop&&d_kvs_)
         {
-           Memcpy(d_kvs_[out_size_].ikey, c_host[i].data_, c_host[i].size_);
-           d_kvs_[out_size_].key_size = c_host[i].size_;
-           d_kvs_[out_size_].value_size = c_host[i].value_len_;
-           d_kvs_[out_size_].value_offset = c_host[i].offset_;
+           Memcpy(d_kvs_[out_size_].ikey, c_host[i].skv->ikey, c_host[i].skv->key_size);
+           d_kvs_[out_size_].key_size = c_host[i].skv->key_size;
+           d_kvs_[out_size_].value_size = c_host[i].skv->value_size;
+           d_kvs_[out_size_].value_offset = c_host[i].skv->value_offset;
            ++ out_size_;
         }
     }
+
+    // for(int i=0;i<num;i++)
+    // {
+    //     bool drop=false;
+    //     if(last_user_key.size_!=0)
+    //     {
+    //         if(last_user_key.size_!=c_host[i].size_)
+    //         {
+    //             last_seq = kMaxSequenceNumber;
+    //         }
+    //         else
+    //         {
+    //             for(int j=0;j<last_user_key.size_-8;j++)
+    //             {
+    //                 if(last_user_key.data_[j]!=c_host[i].data_[j])
+    //                 {
+    //                     last_seq = kMaxSequenceNumber;
+    //                     break;
+    //                 }
+    //             }
+    //         }
+    //     }
+    //     last_user_key.data_=c_host[i].data_;
+    //     last_user_key.size_=c_host[i].size_;
+    //     last_user_key.offset_=c_host[i].offset_;
+    //     last_user_key.value_len_=c_host[i].value_len_;
+    //     uint64_t inum;
+    //     Memcpy((char*)&inum,c_host[i].data_+c_host[i].size_-8,sizeof(inum));
+    //     uint64_t iseq = inum >> 8;
+    //     uint8_t  itype = inum & 0xff;
+    //     if (last_seq <= seq_) {
+    //         drop = true;
+    //     } else if (itype == kTypeDeletion &&iseq <= seq_) {
+    //         drop = true;
+    //     }
+    //     last_seq = iseq;
+    //     if(!drop&&d_kvs_)
+    //     {
+    //        Memcpy(d_kvs_[out_size_].ikey, c_host[i].data_, c_host[i].size_);
+    //        d_kvs_[out_size_].key_size = c_host[i].size_;
+    //        d_kvs_[out_size_].value_size = c_host[i].value_len_;
+    //        d_kvs_[out_size_].value_offset = c_host[i].offset_;
+    //        ++ out_size_;
+    //     }
+    // }
+
     gpu::cudaMemDtH(out_, d_kvs_, sizeof(gpu::SST_kv) * num);
     if(low_slices)
     {
-        cudaFree(low_slices);
+        cudaFreeHost(low_slices);
     }
     if(high_slices)
     {
-        cudaFree(high_slices);
+        cudaFreeHost(high_slices);
     }
     if(ctest)
     {
-        cudaFree(ctest);
+        cudaFreeHost(ctest);
     }
     
 }
