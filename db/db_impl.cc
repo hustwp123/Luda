@@ -1296,14 +1296,18 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     if(useWP)
     {
       //printf("alloc1 size: %d\n",low_kvs);
-      sort.AllocLow(low_kvs);
+      sort.AllocLow(low_kvs,&m_);
       //printf("alloc2 size:%d\n",high_kvs);
-      sort.AllocHigh(high_kvs);
+      sort.AllocHigh(high_kvs,&m_);
+      
       //printf("end\n");
       sort.num=low_kvs+high_kvs;
       sort.low_num=low_kvs;
       sort.high_num=high_kvs;
+      sort.AllocResult(sort.num,&m_);
     }
+
+    //printf("low_keys:%d high_keys:%d\n",low_kvs,high_kvs);
     int low_index=0;
     int high_index=0;
     for (auto &p : low_decode ) {
@@ -1352,15 +1356,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
         delete p;
       }
     }
-    // else
-    // {
-    //   for (auto &p : low_decode ) {
-    //     delete p;
-    //   }
-    //   for (auto &p : high_decode) { 
-    //     delete p;
-    //   }
-    // }
     
     IMM_WRITE();
 
