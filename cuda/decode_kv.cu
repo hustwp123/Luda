@@ -151,13 +151,18 @@ void SSTDecode::DoDecode() {
     //int restarts_idx = 0;
 
     // 2.1 Iterate all the restart array to get all DataBlock offset and size(don't contain type+CRC32)
+    bool tmpb;
     for (uint32_t i = 0; i < index_num; ++i) {
         const char* p = contents + (index_restart[i] >> 8);
         const char* limit = (const char *)index_restart;
         uint32_t shared, non_shared, value_length;
 
         p = DecodeEntry(p, limit, &shared, &non_shared, &value_length);
-        assert(shared == 0);            // index-block中没有使用共享前缀
+        // assert(shared == 0);            // index-block中没有使用共享前缀
+        if(!p) {
+          fprintf(stderr, "ERROR! %s:%d:%s\n", __FILE__, __LINE__, __func__);
+          int* purpose_crash = NULL; *purpose_crash = 1;
+        }
 
         Slice key(p, non_shared);       // the minimal key in this DataBlock
         Slice value(p + non_shared, value_length);

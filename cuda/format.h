@@ -14,20 +14,36 @@ namespace leveldb {
 namespace gpu {
 
 void BlockHandle::EncodeTo(Buffer* dst) {
-    assert(offset_ && size_);
+    bool tmpb = (offset_ && size_);
+    if(!tmpb) {
+      fprintf(stderr, "ERROR! %s:%d:%s\n", __FILE__, __LINE__, __func__);
+      int* purpose_crash = NULL; *purpose_crash = 1;
+    }
     PutVarint64(dst, offset_);
     PutVarint64(dst, size_);
 }
 
      
 bool BlockHandle::DecodeFrom(Slice *input) {
-    assert(GetVarint64(input, &offset_));
-    assert(GetVarint64(input, &size_));
+    bool tmpb = GetVarint64(input, &offset_);
+    if(!tmpb) {
+      fprintf(stderr, "ERROR! %s:%d:%s\n", __FILE__, __LINE__, __func__);
+      int* purpose_crash = NULL; *purpose_crash = 1;
+    }
+    tmpb = (GetVarint64(input, &size_));
+    if(!tmpb) {
+      fprintf(stderr, "ERROR! %s:%d:%s\n", __FILE__, __LINE__, __func__);
+      int* purpose_crash = NULL; *purpose_crash = 1;
+    }
     return true;
 }
 
 void Footer::EncodeTo(Buffer *dst) {
-    assert(dst->total_ == leveldb::Footer::kEncodedLength); // 20 + 20 + 8 = 48
+    bool tmpb = (dst->total_ == leveldb::Footer::kEncodedLength); // 20 + 20 + 8 = 48
+    if(!tmpb) {
+      fprintf(stderr, "ERROR! %s:%d:%s\n", __FILE__, __LINE__, __func__);
+      int* purpose_crash = NULL; *purpose_crash = 1;
+    }
     metaindex_handle_.EncodeTo(dst);
     index_handle_.EncodeTo(dst);
 
@@ -47,8 +63,18 @@ bool Footer::DecodeFrom(Slice *input) {
         return false;
     }
 
-    assert(metaindex_handle_.DecodeFrom(input));
-    assert(index_handle_.DecodeFrom(input));
+    bool tmpb = (metaindex_handle_.DecodeFrom(input));
+    if(!tmpb) {
+      fprintf(stderr, "ERROR! %s:%d:%s\n", __FILE__, __LINE__, __func__);
+      int* purpose_crash = NULL; *purpose_crash = 1;
+    }
+    tmpb = (index_handle_.DecodeFrom(input));
+    if(!tmpb) {
+      fprintf(stderr, "ERROR! %s:%d:%s\n", __FILE__, __LINE__, __func__);
+      int* purpose_crash = NULL; *purpose_crash = 1;
+    }
+    // fprintf(stderr, "XXXDBG cuda/format.h Footer::DecodeFrom() meta/idx_handle_ <off, size>: <%ld, %ld> <%ld, %ld>\n",
+    //         metaindex_handle_.offset_, metaindex_handle_.size_, index_handle_.offset_, index_handle_.size_);
 
     return true;
 }

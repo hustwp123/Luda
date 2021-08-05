@@ -90,17 +90,44 @@ public:
   // Per level compaction stats.  stats_[level] stores the stats for
   // compactions that produced data for the specified "level".
   struct CompactionStats {
-    CompactionStats() : micros(0), bytes_read(0), bytes_written(0) {}
+    CompactionStats() : micros(0), bytes_read(0), bytes_written(0),
+      times_compact(0), times_do_compact_work(0), times_memtbl_wait_for_immtbl(0),
+      times_slowdown(0), times_stop(0), sum_micros(0), sum_bytes_read(0), 
+      sum_bytes_written(0)
+     {}
 
     void Add(const CompactionStats& c) {
       this->micros += c.micros;
       this->bytes_read += c.bytes_read;
       this->bytes_written += c.bytes_written;
+      this->times_compact++;
     }
+
+    //xp
+    // only for config::kNumLevels+1
+    void AddMore(const CompactionStats& c) {
+      this->times_do_compact_work++;
+      this->sum_micros += c.micros;
+      this->sum_bytes_read += c.bytes_read;
+      this->sum_bytes_written += c.bytes_written;
+    }
+
 
     int64_t micros;
     int64_t bytes_read;
     int64_t bytes_written;
+    //xp
+    int64_t times_compact; // how many compaction happens in this level
+
+    //xp
+    // following stats stored in kNumLevels
+    int64_t times_do_compact_work; // how many times DoCompactionWork() runs
+    int64_t times_memtbl_wait_for_immtbl; //how many times memtbl is full while immtbl is been compacted
+    int64_t times_slowdown; // how many times slowdown writes due to flush and compaction
+    int64_t times_stop;     // how many times stop writes due to flush and compaction
+    int64_t sum_micros; // total us for compaction
+    int64_t sum_bytes_read; // total bytes read for compaction
+    int64_t sum_bytes_written; // total bytes write for compaction
   };
 
   Iterator* NewInternalIterator(const ReadOptions&,
@@ -174,6 +201,7 @@ public:
 
   // State below is protected by mutex_
   port::Mutex mutex_;
+  // port::Mutex gpu_write_level0_mutex_; //xp NOTHING DIFFERENT
   std::atomic<bool> shutting_down_;
   port::CondVar background_work_finished_signal_ GUARDED_BY(mutex_);
   MemTable* mem_;
@@ -204,7 +232,8 @@ public:
   // Have we encountered a background error in paranoid mode?
   Status bg_error_ GUARDED_BY(mutex_);
 
-  CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
+  // CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
+  CompactionStats stats_[config::kNumLevels+1] GUARDED_BY(mutex_); //xp
 
   // GPU
   gpu::HostAndDeviceMemory m_;

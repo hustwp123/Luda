@@ -12,6 +12,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <thread>
 
 #include "db/builder.h"
 #include "db/db_iter.h"
@@ -46,21 +47,95 @@ namespace leveldb {
 
 const int kNumNonTableCacheFiles = 10;
 
+//xp
+bool write_a_file(std::string fname, uint32_t fsize, char* buf) {
+  int tmpi;
+  size_t tmpst;
+  if(fname.size() == 0) {
+    fprintf(stderr, "XXXDBG t_write_file() fname len ZERO\n");
+    return false;
+  }
+
+  FILE *fp = fopen(fname.c_str(), "wb");
+  if(!fp) { fprintf(stderr, "XXXDBG thread_write_file() fopen %s ERROR\n", fname.c_str()); return false;}
+  // else { fprintf(stderr, "XXXDBG thread_write_file() OPEN %s OK\n", fname.c_str()); }
+
+  tmpst = ::fwrite(buf, 1, fsize, fp);
+  if(tmpst != fsize) {
+    fprintf(stderr, "XXXDBG thread_write_file() fwrite %s ret: %zu ERROR\n", fname.c_str(), tmpst);
+    return false;
+  }
+  // else {
+  //   fprintf(stderr, "XXXDBG thread_write_file() fwrite %s ret: %zu OK\n", fname.c_str(), tmpst);
+  // }
+
+  tmpi = fflush(fp);
+  if(tmpi != 0) { fprintf(stderr, "XXXDBG thread_write_file() fflush() %s ERROR %d\n", fname.c_str(), tmpi); return false;}
+  // else { fprintf(stderr, "XXXDBG thread_write_file() fflush() %s OK\n", fname.c_str()); }
+
+  tmpi = ::fsync(fileno(fp));
+	if(tmpi) { fprintf(stderr, "XXXDBG thread_write_file() fsync %s ERROR %d\n", fname.c_str(), tmpi); return false;}
+  // else { fprintf(stderr, "XXXDBG thread_write_file() fsync %s OK\n", fname.c_str()); }
+
+  tmpi = ::fclose(fp);
+	if(tmpi) { fprintf(stderr, "XXXDBG thread_write_file() fclose %s ERROR %d\n", fname.c_str(), tmpi); return false;}
+  // else { fprintf(stderr, "XXXDBG thread_write_file() CLOSE %s OK\n", fname.c_str()); }
+
+  return true;
+}
+
 struct write_file {
 	std::string name;
 	gpu::SSTEncode *encode;
+  int idx; //xp
+  // bool result; //xp finished: 1, not: 0
 };
 
 void* thread_write_file(void *arg) {
 	write_file *pf = (write_file *)arg;
 	gpu::SSTEncode *pencode = pf->encode;
+  int tmpi;
+  size_t tmpst;
+  std::string filename(pf->name);
+  uint32_t filesize = pencode->cur_;
+  char* buf = pencode->h_SST_;
+  int file_idx = pf->idx;
 
-	FILE *file = ::fopen(pf->name.data(), "wb");
-	::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
-	::fsync(fileno(file));
-	::fclose(file);
+  // if(pf->result == true) { 
+  //   fprintf(stderr, "XXXDBG thread_write_file() file [[%d]] %s already done. WARNING\n", file_idx, filename.c_str());
+  //   // return ;
+  // }
 
-	delete pencode;
+  // fprintf(stderr, "XXXDBG thread_write_file() fname: %s\n", pf->name.c_str());
+
+	// FILE *file = ::fopen(pf->name.data(), "wb");
+  FILE *file = ::fopen(filename.c_str(), "wb");
+  if(!file) { fprintf(stderr, "XXXDBG thread_write_file() [[%d]] fopen %s ERROR\n", file_idx, filename.c_str()); }
+  else { fprintf(stderr, "XXXDBG thread_write_file() OPEN [[%d]] %s OK\n", file_idx, filename.c_str()); }
+
+  tmpst = ::fwrite(buf, 1, filesize, file);
+  if(tmpst != filesize) {
+    fprintf(stderr, "XXXDBG thread_write_file() fwrite %s ret: %zu ERROR\n", filename.c_str(), tmpst);  
+  }
+  else {
+    fprintf(stderr, "XXXDBG thread_write_file() fwrite %s ret: %zu OK\n", filename.c_str(), tmpst);
+  }
+
+  tmpi = fflush(file);
+  if(tmpi != 0) { fprintf(stderr, "XXXDBG thread_write_file() fflush() %s ERROR %d\n", filename.c_str(), tmpi); }
+  else { fprintf(stderr, "XXXDBG thread_write_file() fflush() %s OK\n", filename.c_str()); }
+
+  tmpi = ::fsync(fileno(file));
+	if(tmpi) { fprintf(stderr, "XXXDBG thread_write_file() fsync %s ERROR %d\n", filename.c_str(), tmpi); }
+  else { fprintf(stderr, "XXXDBG thread_write_file() fsync %s OK\n", filename.c_str()); }
+
+  tmpi = ::fclose(file);
+	if(tmpi) { fprintf(stderr, "XXXDBG thread_write_file() fclose [[%d]] %s ERROR %d\n", file_idx, filename.c_str(), tmpi); }
+  else { fprintf(stderr, "XXXDBG thread_write_file() CLOSE [[%d]] %s OK\n", file_idx, filename.c_str()); }
+
+  // pf->result = true;
+
+	// delete pencode;
 }
 
 
@@ -69,9 +144,15 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env, const Options
     Status s;
     meta->file_size = 0;
     iter->SeekToFirst();
+    // fprintf(stderr, "XXXDBG in  GPUWriteLevel0() %s:%d:%s\n", __FILE__, __LINE__, __func__);
 
     assert(!gpu_write_l0_.load(std::memory_order_relaxed)); // Assume just one thread can call this in one time
+    if(!gpu_write_l0_.load(std::memory_order_relaxed)) {
+      // fprintf(stderr, "WARNING! %s:%d:%s multi GPUWriteLevel0()\n", __FILE__, __LINE__, __func__);
+      // int* purpose_crash = NULL; *purpose_crash = 1;
+    }
     gpu_write_l0_.store(true, std::memory_order_release);
+    // gpu_write_level0_mutex_.Lock();//xp
 
     std::string fname = TableFileName(dbname, meta->number);
     if (iter->Valid()) {
@@ -128,6 +209,7 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env, const Options
     }
 
     gpu_write_l0_.store(false, std::memory_order_release);
+    // gpu_write_level0_mutex_.Unlock();
 
     // Check for input iterator errors
     if (!iter->status().ok()) {
@@ -139,6 +221,7 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env, const Options
     } else {
         env->DeleteFile(fname);
     }
+    // fprintf(stderr, "XXXDBG out GPUWriteLevel0() %s:%d:%s\n", __FILE__, __LINE__, __func__);
     return s;
 }
 
@@ -1269,12 +1352,14 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 
     IMM_WRITE();
 
-    // Encode AND Sort
+    // Decode AND Sort
     gpu::SSTCompactionUtil util(compact->compaction->input_version_, compact->compaction->level());
     gpu::SSTSort sort(compact->smallest_snapshot, m_.h_skv_sorted, &util);
 
     for (auto &p : low_decode ) { p->DoDecode(); }
+    // fprintf(stderr, "XXXDBG DoCompactionWork() low  level DoDecode() done\n"); //xp PASS
     for (auto &p : high_decode) { p->DoDecode(); }
+    // fprintf(stderr, "XXXDBG DoCompactionWork() high level DoDecode() done\n"); //xp PASS
     IMM_WRITE();
 
     for (auto &p : low_decode ) { p->DoGPUDecode_1(); }
@@ -1284,6 +1369,8 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     for (auto &p : low_decode ) { p->DoGPUDecode_2(); }
     for (auto &p : high_decode) { p->DoGPUDecode_2(); }
     IMM_WRITE();
+
+    // fprintf(stderr, "XXXDBG DoCompactionWork() high level DoGPUDecode2() done\n"); //PASS
 
     for (auto &p : low_decode ) {
         if (compact->compaction->level() == 0) {
@@ -1298,6 +1385,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
         delete p;
     }
     IMM_WRITE();
+    // fprintf(stderr, "XXXDBG DoCompactionWork() sort.AddHigh() done\n"); //PASS
 
     duration = (env_->NowMicros() - compaction_start);
     compaction_start = env_->NowMicros();
@@ -1305,6 +1393,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 
     sort.Sort();
     IMM_WRITE();
+    // fprintf(stderr, "XXXDBG DoCompactionWork() sort.Sort() done\n"); //PASS
 
     duration = (env_->NowMicros() - compaction_start);
     compaction_start = env_->NowMicros();
@@ -1347,6 +1436,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     }
 
 	assert(SST_kv_cnts.size() <= CUDA_MAX_COMPACTION_FILES);
+  // fprintf(stderr, "XXXDBG DoCompactionWork() SST_kv_cnts.size(), CUDA_MAX_COMPACTION_FILES: %d, %d\n", SST_kv_cnts.size(), CUDA_MAX_COMPACTION_FILES);// PASS
 
     //Write All SST
     std::vector<gpu::SSTEncode *> encodes;
@@ -1368,6 +1458,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     IMM_WRITE();
     for (auto &p : encodes) { p->DoEncode_4(); }
     IMM_WRITE();
+    // fprintf(stderr, "XXXDBG DoCompactionWork() DoEncode_4() done\n"); //PASS
 
     last_keys = sort.out_size_;
     duration = (env_->NowMicros() - compaction_start);
@@ -1376,7 +1467,10 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 
 	pthread_t tidp[SST_kv_cnts.size()];
 	write_file wr[SST_kv_cnts.size()];
+  int tmpi;
+  std::vector<std::thread> t_write_file;
 
+    // fprintf(stderr, "XXXDBG DoCompactionWork() SST_kv_cnts.size(): %d\n", SST_kv_cnts.size());//PASS
     for (int i = 0; i < SST_kv_cnts.size(); ++i) {
         //int kv_cnt = keys_per_SST <= last_keys ? keys_per_SST : last_keys;
         int kv_cnt = SST_kv_cnts[i];
@@ -1404,23 +1498,44 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
         std::string name = TableFileName(dbname_, out.number);
         ////printf("(%s %d) ", name.data(), kv_cnt);
 
-		/*
-        FILE *file = ::fopen(name.data(), "wb");
-        ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
-		::fsync(fileno(file));
-        ::fclose(file);
-		*/
-		wr[i].name = name;
-		wr[i].encode = pencode;
-		pthread_create(&tidp[i], NULL, thread_write_file, (void *)&wr[i]);
+		
+    //     FILE *file = ::fopen(name.data(), "wb");
+    //     ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
+		// ::fsync(fileno(file));
+    //     ::fclose(file);
+		
+      wr[i].name = name;
+      wr[i].encode = pencode;
+      wr[i].idx = i;
+      // tmpi = pthread_create(&tidp[i], NULL, thread_write_file, (void *)&wr[i]);
+      // if(tmpi) { fprintf(stderr, "XXXDBG DoCompactionWork() pthread_create %d: %d. ERROR\n", i, tmpi); } 
+      // else { fprintf(stderr, "XXXDBG DoCompactionWork() pthread_create [[%d]] name,size: %s, %zu\n", i, wr[i].name.c_str(), pencode->cur_); } //PASS
 
-        last_keys -= kv_cnt;
+      // bool t_write_file(std::string fname, uint32_t fsize, char* buf) {
+      t_write_file.push_back(std::thread(write_a_file, name, pencode->cur_, pencode->h_SST_));
+
+          last_keys -= kv_cnt;
         //delete pencode;
     }
+    // fprintf(stderr, "XXXDBG DoCompactionWork() prepare write ssts done\n"); //PASS
 
-    for (int i = 0; i < SST_kv_cnts.size(); ++i) {
-		pthread_join(tidp[i], NULL);
-	}
+    for (auto& t : t_write_file)
+      t.join();
+
+
+
+    // for (int i = 0; i < 2; i++) {
+    //   fprintf(stderr, "XXXDBG DoCompactionWork() write file.result[%d]: %d\n", i, wr[i].result);
+    // }
+
+    // fprintf(stderr, "XXXDBG DoCompactionWork() pthread_join SST_kv_cnts.size(): %d\n", SST_kv_cnts.size()); //PASS
+    // for (int i = 0; i < SST_kv_cnts.size(); ++i) {
+    // for (int i = 0; i < 2; i++) {
+    //   tmpi = pthread_join(tidp[i], NULL);
+    //   if(tmpi) { fprintf(stderr, "XXXDBG DoCompactionWork() pthread_join [[%d]] ERROR\n", i); }
+    //   else { fprintf(stderr, "XXXDBG DoCompactionWork() pthread_join [[%d]] OK\n", i); }
+    // }
+    // fprintf(stderr, "XXXDBG DoCompactionWork() write sst threads join DONE\n"); //PASS
 
     duration = (env_->NowMicros() - compaction_start);
     //printf("writefiles time:%ld \n", duration);
@@ -1441,6 +1556,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 
     mutex_.Lock();
     stats_[compact->compaction->level() + 1].Add(stats);
+    stats_[config::kNumLevels].AddMore(stats); //xp
 
     Status status;
     status = InstallCompactionResults(compact);
@@ -1449,6 +1565,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     }
     VersionSet::LevelSummaryStorage tmp;
     Log(options_.info_log, "compacted to: %s", versions_->LevelSummary(&tmp));
+    // fprintf(stderr, "XXXDBG DoCompactionWork() done\n");
     return status;
 }
 #endif
@@ -1745,6 +1862,7 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       // this delay hands over some CPU to the compaction thread in
       // case it is sharing the same core as the writer.
       mutex_.Unlock();
+      stats_[config::kNumLevels].times_slowdown++;
       env_->SleepForMicroseconds(1000);     // 这里需要睡眠等待1ms， 这样IOPS就会限制到1000以下
       allow_delay = false;  // Do not delay a single write more than once
       mutex_.Lock();
@@ -1755,10 +1873,12 @@ Status DBImpl::MakeRoomForWrite(bool force) {
     } else if (imm_ != nullptr) {
       // We have filled up the current memtable, but the previous
       // one is still being compacted, so we wait.
+      stats_[config::kNumLevels].times_memtbl_wait_for_immtbl++;
       Log(options_.info_log, "Current memtable full; waiting...\n");
       background_work_finished_signal_.Wait();
     } else if (versions_->NumLevelFiles(0) >= config::kL0_StopWritesTrigger) {
       // There are too many level-0 files.
+      stats_[config::kNumLevels].times_stop++;
       Log(options_.info_log, "Too many L0 files; waiting...\n");
       background_work_finished_signal_.Wait();
     } else {
@@ -1793,6 +1913,11 @@ Status DBImpl::MakeRoomForWrite(bool force) {
 bool DBImpl::GetProperty(const Slice& property, std::string* value) {
   value->clear();
 
+  //xp
+  int64_t sum_micros = 0; // total us for compaction
+  int64_t sum_bytes_read = 0; // total bytes read for compaction
+  int64_t sum_bytes_written = 0; // total bytes write for compactio
+
   MutexLock l(&mutex_);
   Slice in = property;
   Slice prefix("leveldb.");
@@ -1816,20 +1941,43 @@ bool DBImpl::GetProperty(const Slice& property, std::string* value) {
     char buf[200];
     snprintf(buf, sizeof(buf),
              "                               Compactions\n"
-             "Level  Files Size(MB) Time(sec) Read(MB) Write(MB)\n"
-             "--------------------------------------------------\n");
+             "Level  Files Size(MB) Time(sec) Read(MB) Write(MB) Happens\n"
+             "----------------------------------------------------------\n");
     value->append(buf);
     for (int level = 0; level < config::kNumLevels; level++) {
       int files = versions_->NumLevelFiles(level);
       if (stats_[level].micros > 0 || files > 0) {
-        snprintf(buf, sizeof(buf), "%3d %8d %8.0f %9.0f %8.0f %9.0f\n", level,
+        snprintf(buf, sizeof(buf), "%3d %8d %8.0f %9.0f %8.0f %9.0f %8d\n", level,
                  files, versions_->NumLevelBytes(level) / 1048576.0,
                  stats_[level].micros / 1e6,
                  stats_[level].bytes_read / 1048576.0,
-                 stats_[level].bytes_written / 1048576.0);
+                 stats_[level].bytes_written / 1048576.0,
+                 stats_[level].times_compact);
         value->append(buf);
+        sum_micros += stats_[level].micros; //xp
+        sum_bytes_read += stats_[level].bytes_read;
+        sum_bytes_written += stats_[level].bytes_written;
       }
     }
+    //xp
+                              //  3      405     1560        49     7340      6746
+    snprintf(buf, sizeof(buf), "SUM                   %9.0f %8.0f %9.0f\n",
+                 sum_micros / 1e6,
+                 sum_bytes_read / 1048576.0,
+                 sum_bytes_written / 1048576.0);
+    value->append(buf);
+    snprintf(buf, sizeof(buf), "   Compact. times: %8d\n",
+                 stats_[config::kNumLevels].times_do_compact_work);
+    value->append(buf);
+    snprintf(buf, sizeof(buf), "Memtbl full times: %8d\n",
+                 stats_[config::kNumLevels].times_memtbl_wait_for_immtbl);
+    value->append(buf);
+    snprintf(buf, sizeof(buf), "   Slowdown times: %8d\n",
+                 stats_[config::kNumLevels].times_slowdown);
+    value->append(buf);
+    snprintf(buf, sizeof(buf), "       Stop times: %8d\n",
+                 stats_[config::kNumLevels].times_stop);
+    value->append(buf);
     return true;
   } else if (in == "sstables") {
     *value = versions_->current()->DebugString();
