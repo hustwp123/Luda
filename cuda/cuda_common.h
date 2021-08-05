@@ -313,6 +313,8 @@ public:
      void DoGPUDecode_1(WpSlice* slices=nullptr,int index=0);
      void DoGPUDecode_2();
 
+     void Sync();
+
     int all_kv_;
 
 //private:
@@ -384,27 +386,17 @@ public:
         l0_skvs_.push_back(skv);
     }
 
-     void AddLow(int size, SST_kv* skv, SST_kv* skv2=nullptr) {
+     void AddLow(int size, SST_kv* skv) {
         low_sizes_.push_back(size);
         low_idx_.push_back(0);
         low_skvs_.push_back(skv);
-        if(skv2)
-        {
-            low_skvs_2.push_back(skv2);
-            low_kvs+=size;
-        }
         
     }
 
-     void AddHigh(int size, SST_kv* skv,SST_kv* skv2=nullptr) {
+     void AddHigh(int size, SST_kv* skv) {
         high_sizes_.push_back(size);
         high_idx_.push_back(0);
         high_skvs_.push_back(skv);
-        if(skv2)
-        {
-            high_skvs_2.push_back(skv2);
-            high_kvs+=size;
-        }
         
     }
 

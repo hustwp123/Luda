@@ -237,6 +237,13 @@ void SSTDecode::DoGPUDecode_2() {
     cudaMemcpyAsync(h_skv_, d_skv_, sizeof(SST_kv) * all_kv_, cudaMemcpyDeviceToHost, s);
     s_.Sync();
 }
+__host__
+void SSTDecode::Sync()
+{
+    cudaStream_t s = (cudaStream_t) s_.data();
+    //cudaMemcpyAsync(h_skv_, d_skv_, sizeof(SST_kv) * all_kv_, cudaMemcpyDeviceToHost, s);
+    s_.Sync();
+}
 
 // 这里我们对字节处理想按照32字节对齐处理
 // 1. 按照字节为单位，先处理头部不对齐的部分
