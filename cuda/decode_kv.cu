@@ -902,7 +902,7 @@ void SSTSort::WpSort() {
            ++ out_size_;
         }
     }
-    gpu::cudaMemDtH(out_, d_kvs_, sizeof(gpu::SST_kv) * num);
+    //gpu::cudaMemDtH(out_, d_kvs_, sizeof(gpu::SST_kv) * num);
     // if(low_slices)
     // {
     //     cudaFreeHost(low_slices);

@@ -472,7 +472,7 @@ public:
      void SetMemory(HostAndDeviceMemory *m, int base) {
         base_ = base;
 
-        h_skv_ = m->h_skv_sorted + base;
+        h_skv_ = m->d_skv_sorted + base;
         d_skv_ = m->d_skv_sorted;
         d_skv_new_ = m->d_skv_sorted_shared;
 

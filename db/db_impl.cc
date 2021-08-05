@@ -80,7 +80,7 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env, const Options
     std::string fname = TableFileName(dbname, meta->number);
     if (iter->Valid()) {
         int kv_cnt = 0;
-        gpu::SST_kv *pskv = m_.h_skv_sorted;
+        gpu::SST_kv *pskv = m_.d_skv_sorted;
         char *dst = m_.h_SST[0];
         int dst_off = 0;
 
@@ -105,7 +105,7 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env, const Options
         // Copy Key Value to GPU
         ////printf("l0 %s %s cnt:%d\n", fname.data(), meta->largest.DebugString().data(), kv_cnt);
         gpu::cudaMemHtD(m_.d_SST[0], m_.h_SST[0], dst_off);
-        gpu::cudaMemHtD(m_.d_skv_sorted, m_.h_skv_sorted, sizeof(gpu::SST_kv) * kv_cnt);
+        //gpu::cudaMemHtD(m_.d_skv_sorted, m_.h_skv_sorted, sizeof(gpu::SST_kv) * kv_cnt);
 
         gpu::SSTEncode encode(m_.h_SST[0], kv_cnt, 0);
         encode.SetMemory(&m_, 0);
@@ -1278,7 +1278,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 
     // Encode AND Sort
     gpu::SSTCompactionUtil util(compact->compaction->input_version_, compact->compaction->level());
-    gpu::SSTSort sort(compact->smallest_snapshot, m_.h_skv_sorted, &util,m_.d_skv_sorted);
+    gpu::SSTSort sort(compact->smallest_snapshot, m_.d_skv_sorted, &util,m_.d_skv_sorted);
     bool useWP=(compact->compaction->level() != 0);
     //bool useWP=false;
     int low_kvs=0;
@@ -1392,11 +1392,11 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     //Encode
     //gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_, sizeof(gpu::SST_kv) * sort.out_size_);
 
-    if(!useWP)
-    {
-      //Encode
-      gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_, sizeof(gpu::SST_kv) * sort.out_size_);
-    }
+    // if(!useWP)
+    // {
+    //   //Encode
+    //   gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_, sizeof(gpu::SST_kv) * sort.out_size_);
+    // }
     
 
     int last_keys = sort.out_size_;
@@ -1462,14 +1462,13 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 
 	pthread_t tidp[SST_kv_cnts.size()];
 	write_file wr[SST_kv_cnts.size()];
-
     for (int i = 0; i < SST_kv_cnts.size(); ++i) {
         //int kv_cnt = keys_per_SST <= last_keys ? keys_per_SST : last_keys;
         int kv_cnt = SST_kv_cnts[i];
         gpu::SSTEncode *pencode = encodes[i];
 
         // Write One SST
-        gpu::SST_kv *p = m_.h_skv_sorted;
+        gpu::SST_kv *p = m_.d_skv_sorted;
         int kv_start = sort.out_size_ - last_keys;
         Slice smallerst(p[kv_start].ikey, p[kv_start].key_size);
         Slice largest(p[kv_start + kv_cnt - 1].ikey, p[kv_start + kv_cnt - 1].key_size);
@@ -1507,7 +1506,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     for (int i = 0; i < SST_kv_cnts.size(); ++i) {
 		pthread_join(tidp[i], NULL);
 	}
-
     duration = (env_->NowMicros() - compaction_start);
     //printf("writefiles time:%ld \n", duration);
     duration = (env_->NowMicros() - real_start);
