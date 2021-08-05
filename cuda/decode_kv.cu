@@ -190,13 +190,13 @@ void SSTDecode::DoDecode() {
             uint32_t cnt = array[j] & 0xff;
             uint32_t off = array[j] >> 8;
 
-            h_gdi_[shared_cnt_ + j].offset = data.offset_ + off;
-            h_gdi_[shared_cnt_ + j].kv_base_idx = all_kv_;
+            d_gdi_[shared_cnt_ + j].offset = data.offset_ + off;
+            d_gdi_[shared_cnt_ + j].kv_base_idx = all_kv_;
 
             if (j + 1 < data_restart_num) {
-                h_gdi_[shared_cnt_ + j].limit = data.offset_ + (array[j + 1] >> 8);
+                d_gdi_[shared_cnt_ + j].limit = data.offset_ + (array[j + 1] >> 8);
             } else {
-                h_gdi_[shared_cnt_ + j].limit = data.offset_ + data.size_ - sizeof(uint32_t) * (data_restart_num + 1);
+                d_gdi_[shared_cnt_ + j].limit = data.offset_ + data.size_ - sizeof(uint32_t) * (data_restart_num + 1);
             }
 
             all_kv_ += cnt;
@@ -226,7 +226,7 @@ __host__
 void SSTDecode::DoGPUDecode_1(WpSlice* slices,int index) {
     cudaStream_t s = (cudaStream_t) s_.data();
     cudaMemcpyAsync(d_SST_, h_SST_, file_size_, cudaMemcpyHostToDevice, s);
-    cudaMemcpyAsync(d_gdi_, h_gdi_, sizeof(GDI) * shared_cnt_, cudaMemcpyHostToDevice, s);
+    //cudaMemcpyAsync(d_gdi_, h_gdi_, sizeof(GDI) * shared_cnt_, cudaMemcpyHostToDevice, s);
 
     GPUDecodeKernel<<<M, N, 0, s>>>(d_SST_ptr_, SST_idx_, d_gdi_, shared_cnt_, d_skv_,slices,index);
 }
@@ -1293,6 +1293,7 @@ __host__ void SSTEncode::DoEncode_4() {
         //printf("%d %x\n", filter_end_, result);
         memcpy(h_SST_ + filter_handle_.offset_ + filter_handle_.size_ + 1, &result, 4);
     }
+
 
     s1_.Sync();
     s2_.Sync();

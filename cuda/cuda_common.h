@@ -502,6 +502,7 @@ public:
     void DoEncode_4();
 
     char *h_SST_;
+
     char *d_SST_new_;
     uint32_t cur_;              // 指示当前写到什么地方了
 
