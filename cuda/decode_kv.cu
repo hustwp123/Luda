@@ -843,23 +843,18 @@ void SSTSort::WpSort() {
         out_size_=0;
         return;
     }
-    // std::vector<WpSlice> c_host;
-    // cudaError_t result = dtoh(c_host, ctest, num);
-    // if(cudaSuccess != result) throw cuda_exception_t(result);
+    std::vector<WpSlice> c_host;
+    cudaError_t result = dtoh(c_host, ctest, num);
+    if(cudaSuccess != result) throw cuda_exception_t(result);
 
-    WpSlice *c_host=ctest;
+    //printf("c_host:%d  ctest:%d num==%d size=%d\n",c_host[0].skv->key_size,ctest[0].skv->key_size,num,c_host.size());
+
+
+    //WpSlice *c_host=ctest;
 
     for(int i=0;i<num;i++)
     {
-        // if(c_host[i].drop)
-        // {
-        //     continue;
-        // }
         bool drop=false;
-        // if(drop)
-        // {
-        //     continue;
-        // }
         if(last_user_key.skv)
         {
             if(last_user_key.skv->key_size!=c_host[i].skv->key_size)
