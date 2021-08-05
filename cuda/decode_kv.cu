@@ -1057,7 +1057,7 @@ void SSTEncode::ComputeFilter() {
     // 遍历所有的Filter
     for (int i = 0; i < datablock_count_; ++i) {
 
-        filter_meta *pfm = &h_fmeta_[i];
+        filter_meta *pfm = &d_fmeta_[i];
 
         pfm->offset = cur_;
         //pfm->filter_size = (pfm->cnt * kBitsPerKey + 7) / 8 + 1;
@@ -1268,11 +1268,11 @@ __host__ void SSTEncode::DoEncode_2() {
 __host__ void SSTEncode::DoEncode_3() {
     int k = 7;
     data_blocks_size_ = cur_;
-    cudaStream_t s1 = (cudaStream_t) s1_.data();
+    //cudaStream_t s1 = (cudaStream_t) s1_.data();
     cudaStream_t s2 = (cudaStream_t) s2_.data();
 
     ComputeFilter();
-    cudaMemcpyAsync(d_fmeta_, h_fmeta_, sizeof(filter_meta) * datablock_count_, cudaMemcpyHostToDevice, s2);
+    //cudaMemcpyAsync(d_fmeta_, h_fmeta_, sizeof(filter_meta) * datablock_count_, cudaMemcpyHostToDevice, s2);
     GPUEncodeFilter<<<M, N, 0, s2>>>(d_SST_new_, d_skv_, d_fmeta_, datablock_count_, k, 0);
 }
 
