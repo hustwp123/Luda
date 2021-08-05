@@ -1013,8 +1013,8 @@ void SSTEncode::ComputeDataBlockOffset(int SC) { // SC: shared_count
 
             ++ sc;
             cnt += sc_cnt;
-            h_shared_offset_[idx] = (cur_ << 8) | sc_cnt;
-            cur_ += h_shared_size_[idx];
+            d_shared_offset_[idx] = (cur_ << 8) | sc_cnt;
+            cur_ += d_shared_size_[idx];
         }
 
         h_fmeta_[i].cnt = cnt;
@@ -1249,11 +1249,11 @@ __host__ void SSTEncode::DoEncode_2() {
     cudaStream_t s1 = (cudaStream_t) s1_.data();
     cudaStream_t s2 = (cudaStream_t) s2_.data();
 
-    cudaMemcpyAsync(h_shared_size_, d_shared_size_, sizeof(uint32_t ) * shared_count_, cudaMemcpyDeviceToHost, s1);
+    // cudaMemcpyAsync(h_shared_size_, d_shared_size_, sizeof(uint32_t ) * shared_count_, cudaMemcpyDeviceToHost, s1);
     cudaStreamSynchronize(s1);
 
     ComputeDataBlockOffset();
-    cudaMemcpyAsync(d_shared_offset_, h_shared_offset_, sizeof(uint32_t ) * shared_count_, cudaMemcpyHostToDevice, s1);
+    // cudaMemcpyAsync(d_shared_offset_, h_shared_offset_, sizeof(uint32_t ) * shared_count_, cudaMemcpyHostToDevice, s1);
 
     //dim3 block(32, 16), grid(512, 1);
     dim3 block(32, 16), grid(M, 1);
