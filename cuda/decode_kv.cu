@@ -97,8 +97,8 @@ HostAndDeviceMemory::HostAndDeviceMemory() {
     low_size=50000;
     high_size=150000;
     result_size=200000;
-    cudaMallocHost((void **)&lowSlices, sizeof(WpSlice) * low_size);
-    cudaMallocHost((void **)&highSlices, sizeof(WpSlice) * high_size);
+    cudaMalloc((void **)&lowSlices, sizeof(WpSlice) * low_size);
+    cudaMalloc((void **)&highSlices, sizeof(WpSlice) * high_size);
     cudaMallocHost((void **)&resultSlice, sizeof(WpSlice) * result_size);
 
     // 排序好的空间申请
@@ -136,8 +136,8 @@ HostAndDeviceMemory::~HostAndDeviceMemory() {
 
     free(h_skv_sorted);
 
-    cudaFreeHost(lowSlices);
-    cudaFreeHost(highSlices);
+    cudaFree(lowSlices);
+    cudaFree(highSlices);
     cudaFreeHost(resultSlice);
 
     cudaFreeHost(d_skv_sorted);
@@ -700,25 +700,25 @@ Slice SSTSort::FindL0Smallest() {
 
 MGPU_HOST_DEVICE bool WpSlice::operator <(WpSlice& b)
 {
-    uint64_t anum,bnum;
-    Memcpy((char*)&anum,skv->ikey+skv->key_size-8,sizeof(anum));
-    Memcpy((char*)&bnum,b.skv->ikey+b.skv->key_size-8,sizeof(bnum));
-    uint64_t aseq=anum>>8;
-    uint8_t atype=bnum&0xff;
-    uint64_t bseq=bnum>>8;
-    uint8_t btype=bnum&0xff;
-    if(atype==kTypeDeletion&&aseq<=seq_)
-    {
-        drop=true;
-    }
-    if(btype==kTypeDeletion&&bseq<=seq_)
-    {
-        b.drop=true;
-    }
-    if(drop||b.drop)
-    {
-        return true;
-    }
+    // uint64_t anum,bnum;
+    // Memcpy((char*)&anum,skv->ikey+skv->key_size-8,sizeof(anum));
+    // Memcpy((char*)&bnum,b.skv->ikey+b.skv->key_size-8,sizeof(bnum));
+    // uint64_t aseq=anum>>8;
+    // uint8_t atype=bnum&0xff;
+    // uint64_t bseq=bnum>>8;
+    // uint8_t btype=bnum&0xff;
+    // if(atype==kTypeDeletion&&aseq<=seq_)
+    // {
+    //     drop=true;
+    // }
+    // if(btype==kTypeDeletion&&bseq<=seq_)
+    // {
+    //     b.drop=true;
+    // }
+    // if(drop||b.drop)
+    // {
+    //     return true;
+    // }
     size_t min_len=(skv->key_size < b.skv->key_size) ? skv->key_size : b.skv->key_size;
     min_len-=8;
     for(int i=0;i<min_len;i++)
@@ -740,9 +740,9 @@ MGPU_HOST_DEVICE bool WpSlice::operator <(WpSlice& b)
     {
         return false;
     }
-    // uint64_t anum,bnum;
-    // Memcpy((char*)&anum,skv->ikey+skv->key_size-8,sizeof(anum));
-    // Memcpy((char*)&bnum,b.skv->ikey+b.skv->key_size-8,sizeof(bnum));
+    uint64_t anum,bnum;
+    Memcpy((char*)&anum,skv->ikey+skv->key_size-8,sizeof(anum));
+    Memcpy((char*)&bnum,b.skv->ikey+b.skv->key_size-8,sizeof(bnum));
     
     return anum<bnum;
 
@@ -767,11 +767,11 @@ void SSTSort::AllocLow(int size,HostAndDeviceMemory* m)
     //     printf("error1\n");
     //     exit(-1);
     // }
-    for(int i=0;i<size;i++)
-    {
-        low_slices[i].drop=false;
-        low_slices[i].seq_=seq_;
-    }
+    // for(int i=0;i<size;i++)
+    // {
+    //     low_slices[i].drop=false;
+    //     low_slices[i].seq_=seq_;
+    // }
 }
 void SSTSort::AllocHigh(int size,HostAndDeviceMemory* m)
 {
@@ -792,11 +792,11 @@ void SSTSort::AllocHigh(int size,HostAndDeviceMemory* m)
     //     printf("error2\n");
     //     exit(-1);
     // }
-    for(int i=0;i<size;i++)
-    {
-        high_slices[i].drop=false;
-        high_slices[i].seq_=seq_;
-    }
+    // for(int i=0;i<size;i++)
+    // {
+    //     high_slices[i].drop=false;
+    //     high_slices[i].seq_=seq_;
+    // }
 }
 
 void SSTSort::AllocResult(int size,HostAndDeviceMemory* m)
@@ -851,11 +851,11 @@ void SSTSort::WpSort() {
 
     for(int i=0;i<num;i++)
     {
-        if(c_host[i].drop)
-        {
-            continue;
-        }
-        bool drop=false;//=(c_host[i].drop==2);
+        // if(c_host[i].drop)
+        // {
+        //     continue;
+        // }
+        bool drop=false;
         // if(drop)
         // {
         //     continue;
@@ -879,16 +879,16 @@ void SSTSort::WpSort() {
             }
         }
         last_user_key.skv=c_host[i].skv;
-        // uint64_t inum;
-        // Memcpy((char*)&inum,c_host[i].skv->ikey+c_host[i].skv->key_size-8,sizeof(inum));
-        // uint64_t iseq = inum >> 8;
-        // uint8_t  itype = inum & 0xff;
+        uint64_t inum;
+        Memcpy((char*)&inum,c_host[i].skv->ikey+c_host[i].skv->key_size-8,sizeof(inum));
+        uint64_t iseq = inum >> 8;
+        uint8_t  itype = inum & 0xff;
         if (last_seq <= seq_) {
             drop = true;
         } 
-        // else if (itype == kTypeDeletion &&iseq <= seq_) {
-        //     drop = true;
-        // }
+        else if (itype == kTypeDeletion &&iseq <= seq_) {
+            drop = true;
+        }
         last_seq = iseq;
         if(!drop&&d_kvs_)
         {

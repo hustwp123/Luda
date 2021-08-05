@@ -47,8 +47,8 @@ public:
 
     SST_kv* skv;
 
-    bool drop;   
-    uint64_t seq_;
+    // bool drop;   
+    // uint64_t seq_;
 };
 
 class Stream {
