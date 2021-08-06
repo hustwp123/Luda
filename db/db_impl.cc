@@ -81,7 +81,7 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env, const Options
     if (iter->Valid()) {
         int kv_cnt = 0;
         gpu::SST_kv *pskv = m_.d_skv_sorted;
-        char *dst = m_.h_SST[0];
+        char *dst = m_.d_SST[0];
         int dst_off = 0;
 
         // Get all key-Value
@@ -101,11 +101,6 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env, const Options
             dst_off += value.size();
             ++ kv_cnt;
         }
-
-        // Copy Key Value to GPU
-        ////printf("l0 %s %s cnt:%d\n", fname.data(), meta->largest.DebugString().data(), kv_cnt);
-        gpu::cudaMemHtD(m_.d_SST[0], m_.h_SST[0], dst_off);
-        //gpu::cudaMemHtD(m_.d_skv_sorted, m_.h_skv_sorted, sizeof(gpu::SST_kv) * kv_cnt);
 
         gpu::SSTEncode encode(m_.h_SST[0], kv_cnt, 0);
         encode.SetMemory(&m_, 0);

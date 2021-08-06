@@ -100,6 +100,7 @@ HostAndDeviceMemory::HostAndDeviceMemory() {
     cudaMalloc((void **)&lowSlices, sizeof(WpSlice) * low_size);
     cudaMalloc((void **)&highSlices, sizeof(WpSlice) * high_size);
     cudaMallocHost((void **)&resultSlice, sizeof(WpSlice) * result_size);
+    //cudaMallocHost((void **)&wp_d_SST, __SST_SIZE + 100 * 1024);
 
     // 排序好的空间申请
     h_skv_sorted = (SST_kv *)malloc(sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
@@ -1076,12 +1077,14 @@ void SSTEncode::ComputeFilter() {
     filter_end_ = cur_;
 
     // Finish Filter
-    Buffer buf(h_SST_ + cur_, sizeof(uint32_t) * (offsets.size() + 1 + 1));
-    for (int i = 0; i < offsets.size(); ++i) {
-        PutFixed32(&buf, offsets[i]);
-    }
-    //PutFixed32(&buf, offsets.size());
-    PutFixed32(&buf, filter_end_ - filter_handle_.offset_);
+    
+    // Buffer buf(h_SST_ + cur_, sizeof(uint32_t) * (offsets.size() + 1 + 1));
+    // for (int i = 0; i < offsets.size(); ++i) {
+    //     PutFixed32(&buf, offsets[i]);
+    // }
+    // //PutFixed32(&buf, offsets.size());
+    // PutFixed32(&buf, filter_end_ - filter_handle_.offset_);
+
     cur_ += sizeof(uint32_t) * (offsets.size() + 1);
 
     *(h_SST_ + cur_) = 11; cur_ += 1;
@@ -1093,6 +1096,7 @@ void SSTEncode::ComputeFilter() {
 
 __host__
 void SSTEncode::WriteIndexAndFooter() {
+    h_SST_=d_SST_new_;
     footer.metaindex_handle_.offset_ = cur_;
     const char *filter_name = "filter.leveldb.BuiltinBloomFilter2";
     char cbuf[128];
@@ -1249,12 +1253,9 @@ __host__ void SSTEncode::DoEncode_2() {
     cudaStream_t s1 = (cudaStream_t) s1_.data();
     cudaStream_t s2 = (cudaStream_t) s2_.data();
 
-    // cudaMemcpyAsync(h_shared_size_, d_shared_size_, sizeof(uint32_t ) * shared_count_, cudaMemcpyDeviceToHost, s1);
     cudaStreamSynchronize(s1);
 
     ComputeDataBlockOffset();
-    // cudaMemcpyAsync(d_shared_offset_, h_shared_offset_, sizeof(uint32_t ) * shared_count_, cudaMemcpyHostToDevice, s1);
-
     //dim3 block(32, 16), grid(512, 1);
     dim3 block(32, 16), grid(M, 1);
     GPUEncodeCopyShared<<<grid, block, 0, s1>>>(d_SST_ptr, d_SST_new_, d_skv_new_, base_, 
@@ -1280,9 +1281,9 @@ __host__ void SSTEncode::DoEncode_4() {
     cudaStream_t s1 = (cudaStream_t) s1_.data();
     cudaStream_t s2 = (cudaStream_t) s2_.data();
 
-    cudaMemcpyAsync(h_SST_, d_SST_new_, data_blocks_size_, cudaMemcpyDeviceToHost, s1);
-    cudaMemcpyAsync(h_SST_ + filter_handle_.offset_, d_SST_new_ + filter_handle_.offset_, 
-            filter_end_ - filter_handle_.offset_, cudaMemcpyDeviceToHost, s2);
+    // cudaMemcpyAsync(h_SST_, d_SST_new_, data_blocks_size_, cudaMemcpyDeviceToHost, s1);
+    // cudaMemcpyAsync(h_SST_ + filter_handle_.offset_, d_SST_new_ + filter_handle_.offset_, 
+    //         filter_end_ - filter_handle_.offset_, cudaMemcpyDeviceToHost, s2);
 
     WriteIndexAndFooter();
 
