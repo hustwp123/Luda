@@ -1252,7 +1252,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     for (auto &low : compact->compaction->inputs_[0]) {
         std::string filename = TableFileName(dbname_, low->number);
         ////printf("%s ", filename.data());
-        gpu::SSTDecode *p = new gpu::SSTDecode(filename.data(), low->file_size, m_.h_SST[sst_idx]);
+        gpu::SSTDecode *p = new gpu::SSTDecode(filename.data(), low->file_size, m_.d_SST[sst_idx]);
         p->SetMemory(sst_idx ++, &m_);
         low_decode.push_back(p);
     }
@@ -1261,7 +1261,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     for (auto &high : compact->compaction->inputs_[1]) {
         std::string filename = TableFileName(dbname_, high->number);
         ////printf("%s ", filename.data());
-        gpu::SSTDecode *p = new gpu::SSTDecode(filename.data(), high->file_size, m_.h_SST[sst_idx]);
+        gpu::SSTDecode *p = new gpu::SSTDecode(filename.data(), high->file_size, m_.d_SST[sst_idx]);
         p->SetMemory(sst_idx ++, &m_);
         high_decode.push_back(p);
     }

@@ -226,7 +226,8 @@ void SSTDecode::DoGPUDecode() {
 __host__
 void SSTDecode::DoGPUDecode_1(WpSlice* slices,int index) {
     cudaStream_t s = (cudaStream_t) s_.data();
-    cudaMemcpyAsync(d_SST_, h_SST_, file_size_, cudaMemcpyHostToDevice, s);
+    d_SST_=h_SST_;
+    //cudaMemcpyAsync(d_SST_, h_SST_, file_size_, cudaMemcpyHostToDevice, s);
     //cudaMemcpyAsync(d_gdi_, h_gdi_, sizeof(GDI) * shared_cnt_, cudaMemcpyHostToDevice, s);
 
     GPUDecodeKernel<<<M, N, 0, s>>>(d_SST_ptr_, SST_idx_, d_gdi_, shared_cnt_, d_skv_,slices,index);
@@ -1077,7 +1078,7 @@ void SSTEncode::ComputeFilter() {
     filter_end_ = cur_;
 
     // Finish Filter
-    
+
     // Buffer buf(h_SST_ + cur_, sizeof(uint32_t) * (offsets.size() + 1 + 1));
     // for (int i = 0; i < offsets.size(); ++i) {
     //     PutFixed32(&buf, offsets[i]);
