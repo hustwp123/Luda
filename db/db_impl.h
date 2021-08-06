@@ -92,8 +92,8 @@ public:
   struct CompactionStats {
     CompactionStats() : micros(0), bytes_read(0), bytes_written(0),
       times_compact(0), times_do_compact_work(0), times_memtbl_wait_for_immtbl(0),
-      times_slowdown(0), times_stop(0), sum_micros(0), sum_bytes_read(0), 
-      sum_bytes_written(0)
+      times_slowdown(0), times_stop(0), times_flush_immtbl(0), sum_micros(0), 
+      sum_bytes_read(0), sum_bytes_written(0)
      {}
 
     void Add(const CompactionStats& c) {
@@ -107,9 +107,9 @@ public:
     // only for config::kNumLevels+1
     void AddMore(const CompactionStats& c) {
       this->times_do_compact_work++;
-      this->sum_micros += c.micros;
-      this->sum_bytes_read += c.bytes_read;
-      this->sum_bytes_written += c.bytes_written;
+      this->sum_micros += c.micros; //xp !!! ERROR
+      this->sum_bytes_read += c.bytes_read; //xp !!! ERROR
+      this->sum_bytes_written += c.bytes_written; //xp !!! ERROR
     }
 
 
@@ -122,6 +122,7 @@ public:
     //xp
     // following stats stored in kNumLevels
     int64_t times_do_compact_work; // how many times DoCompactionWork() runs
+    int64_t times_flush_immtbl; // how many times flusing immtbl to sst
     int64_t times_memtbl_wait_for_immtbl; //how many times memtbl is full while immtbl is been compacted
     int64_t times_slowdown; // how many times slowdown writes due to flush and compaction
     int64_t times_stop;     // how many times stop writes due to flush and compaction

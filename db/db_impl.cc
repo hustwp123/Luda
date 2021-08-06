@@ -734,6 +734,7 @@ void DBImpl::CompactMemTable() {
   Version* base = versions_->current();
   base->Ref();
   Status s = WriteLevel0Table(imm_, &edit, base);
+  stats_[config::kNumLevels].times_flush_immtbl++;
   base->Unref();
 
   if (s.ok() && shutting_down_.load(std::memory_order_acquire)) {
@@ -1917,6 +1918,7 @@ bool DBImpl::GetProperty(const Slice& property, std::string* value) {
   int64_t sum_micros = 0; // total us for compaction
   int64_t sum_bytes_read = 0; // total bytes read for compaction
   int64_t sum_bytes_written = 0; // total bytes write for compactio
+  int64_t sum_compact = 0; // total times of compact
 
   MutexLock l(&mutex_);
   Slice in = property;
@@ -1947,35 +1949,40 @@ bool DBImpl::GetProperty(const Slice& property, std::string* value) {
     for (int level = 0; level < config::kNumLevels; level++) {
       int files = versions_->NumLevelFiles(level);
       if (stats_[level].micros > 0 || files > 0) {
-        snprintf(buf, sizeof(buf), "%3d %8d %8.0f %9.0f %8.0f %9.0f %8d\n", level,
+        snprintf(buf, sizeof(buf), "%3d %8d %8.0f %9.0f %8.0f %9.0f %8ld\n", level,
                  files, versions_->NumLevelBytes(level) / 1048576.0,
                  stats_[level].micros / 1e6,
                  stats_[level].bytes_read / 1048576.0,
                  stats_[level].bytes_written / 1048576.0,
-                 stats_[level].times_compact);
+                 stats_[level+1].times_compact);
         value->append(buf);
         sum_micros += stats_[level].micros; //xp
         sum_bytes_read += stats_[level].bytes_read;
         sum_bytes_written += stats_[level].bytes_written;
+        sum_compact += stats_[level+1].times_compact;
       }
     }
     //xp
                               //  3      405     1560        49     7340      6746
-    snprintf(buf, sizeof(buf), "SUM                   %9.0f %8.0f %9.0f\n",
+    snprintf(buf, sizeof(buf), "SUM                   %9.0f %8.0f %9.0f %8ld\n",
                  sum_micros / 1e6,
                  sum_bytes_read / 1048576.0,
-                 sum_bytes_written / 1048576.0);
+                 sum_bytes_written / 1048576.0,
+                 sum_compact);
     value->append(buf);
-    snprintf(buf, sizeof(buf), "   Compact. times: %8d\n",
-                 stats_[config::kNumLevels].times_do_compact_work);
+    // snprintf(buf, sizeof(buf), "   Compact. times: %8ld\n",
+    //              stats_[config::kNumLevels].times_do_compact_work);
+    // value->append(buf);
+    snprintf(buf, sizeof(buf), "Flush Imm_. times: %8ld\n",
+                 stats_[config::kNumLevels].times_flush_immtbl);
     value->append(buf);
-    snprintf(buf, sizeof(buf), "Memtbl full times: %8d\n",
+    snprintf(buf, sizeof(buf), "Memtbl full times: %8ld\n",
                  stats_[config::kNumLevels].times_memtbl_wait_for_immtbl);
     value->append(buf);
-    snprintf(buf, sizeof(buf), "   Slowdown times: %8d\n",
+    snprintf(buf, sizeof(buf), "   Slowdown times: %8ld\n",
                  stats_[config::kNumLevels].times_slowdown);
     value->append(buf);
-    snprintf(buf, sizeof(buf), "       Stop times: %8d\n",
+    snprintf(buf, sizeof(buf), "       Stop times: %8ld\n",
                  stats_[config::kNumLevels].times_stop);
     value->append(buf);
     return true;

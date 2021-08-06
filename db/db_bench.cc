@@ -257,10 +257,11 @@ class Stats {
     if (done_ < 1) done_ = 1;
 
     std::string extra;
+    double elapsed = (finish_ - start_) * 1e-6; //xp
     if (bytes_ > 0) {
       // Rate is computed on actual elapsed time, not the sum of per-thread
       // elapsed times.
-      double elapsed = (finish_ - start_) * 1e-6;
+      // double elapsed = (finish_ - start_) * 1e-6;
       char rate[100];
       snprintf(rate, sizeof(rate), "%6.1f MB/s",
                (bytes_ / 1048576.0) / elapsed);
@@ -270,6 +271,7 @@ class Stats {
 
     fprintf(stdout, "%-12s : %11.3f micros/op;%s%s\n", name.ToString().c_str(),
             seconds_ * 1e6 / done_, (extra.empty() ? "" : " "), extra.c_str());
+    fprintf(stdout, "Uptime (second): %8.1f\n", elapsed); //xp
     if (FLAGS_histogram) {
       fprintf(stdout, "Microseconds per op:\n%s\n", hist_.ToString().c_str());
     }
