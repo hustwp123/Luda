@@ -77,6 +77,8 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env, const Options
     assert(!gpu_write_l0_.load(std::memory_order_relaxed)); // Assume just one thread can call this in one time
     gpu_write_l0_.store(true, std::memory_order_release);
 
+    // uint64_t start = env_->NowMicros();
+    
     std::string fname = TableFileName(dbname, meta->number);
     if (iter->Valid()) {
         int kv_cnt = 0;
@@ -101,14 +103,24 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env, const Options
             dst_off += value.size();
             ++ kv_cnt;
         }
+        // uint64_t tmp = env_->NowMicros();
+        // printf("mem time :% ld\n",tmp-start);
 
         gpu::SSTEncode encode(m_.h_SST[0], kv_cnt, 0);
         encode.SetMemory(&m_, 0);
         //encode.DoEncode();
         encode.DoEncode_1();
         encode.DoEncode_2();
+        // uint64_t tmp2 = env_->NowMicros();
+        // printf("1-2 time :% ld\n",tmp2-tmp);
         encode.DoEncode_3();
+        // uint64_t tmp0 = env_->NowMicros();
+        // printf("3 time :% ld\n",tmp0-tmp);
         encode.DoEncode_4();
+        // uint64_t tmp3 = env_->NowMicros();
+        // printf("4 time :% ld\n",tmp3-tmp0);
+        // uint64_t second = env_->NowMicros();
+        // printf("first time :% ld\n",second-start);
 
         // Finish and check for builder errors
         meta->file_size = encode.cur_;
@@ -116,6 +128,8 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env, const Options
         ::fwrite(encode.h_SST_, 1, encode.cur_, f);
         ::fclose(f);
 
+        // uint64_t third = env_->NowMicros();
+        // printf("second time :% ld\n",third-second);
         // Finish and check for file errors
         if (true) {
             // Verify that the table is usable

@@ -247,10 +247,8 @@ public:
     std::vector<char *> d_SST;
     std::vector<char *> d_SST_new;
 
-    std::vector<GDI *> h_gdi;
     std::vector<GDI *> d_gdi;
 
-    std::vector<SST_kv *> h_skv;
     std::vector<SST_kv *> d_skv;
 
     // Decode后Sorted排序好的
@@ -261,13 +259,10 @@ public:
     // Device 端访问SST的数组
     char **d_SST_ptr;
 
-    std::vector<uint32_t *> h_shared_size;
     std::vector<uint32_t *> d_shared_size;
 
-    std::vector<uint32_t *> h_shared_offset;
     std::vector<uint32_t *> d_shared_offset;
 
-    std::vector<filter_meta *> h_fmeta;
     std::vector<filter_meta *> d_fmeta;
 
     WpSlice* lowSlices;
@@ -295,13 +290,10 @@ public:
         d_SST_ptr_ = m->d_SST_ptr;
         SST_idx_ = idx;
 
-        //h_SST_ = m->h_SST[idx];
         d_SST_ = m->d_SST[idx];
 
-        h_skv_ = m->h_skv[idx];
         d_skv_ = m->d_skv[idx];
 
-        h_gdi_ = m->h_gdi[idx];
         d_gdi_ = m->d_gdi[idx];
     }
 
@@ -322,16 +314,13 @@ public:
     char* d_SST_;
 
     int   file_size_;
-    GDI*  h_gdi_;
     GDI*  d_gdi_;
 
-    SST_kv* h_skv_;
     SST_kv* d_skv_;
 
     char **d_SST_ptr_;
     int SST_idx_;
     int shared_cnt_;  // the count of all restarts
-
     Stream s_;
 };
 
@@ -479,13 +468,10 @@ public:
         d_SST_ptr = m->d_SST_ptr;
         d_SST_new_ = m->d_SST_new[SST_idx_];
 
-        h_shared_size_ = m->h_shared_size[SST_idx_];
         d_shared_size_ = m->d_shared_size[SST_idx_];
 
-        h_shared_offset_ = m->h_shared_offset[SST_idx_];
         d_shared_offset_ = m->d_shared_offset[SST_idx_];
 
-        h_fmeta_ = m->h_fmeta[SST_idx_];
         d_fmeta_ = m->d_fmeta[SST_idx_];
     }
 
@@ -518,15 +504,12 @@ public:
     int datablock_count_;       //  一共有多少个KV DataBlock
 
     /* 共享前缀的Shared块的一些信息 */
-    uint32_t *h_shared_size_;
     uint32_t *d_shared_size_;
     int shared_count_;
 
-    uint32_t *h_shared_offset_;   // 每个shared从哪个地方开始写
+  // 每个shared从哪个地方开始写
     uint32_t *d_shared_offset_;
 
-
-    filter_meta *h_fmeta_;        // 每个DataBlock对应的Filter元数据，包括多少个KV，从第几个开始等
     filter_meta *d_fmeta_;        // 每个DataBlock对应的Filter元数据，包括多少个KV，从第几个开始等
 
     std::vector<block_meta> bmeta_;          // 每个KV DataBlock的元数据，offset、size

@@ -107,7 +107,7 @@ void check_db() {
 
     delete db;
 }
-
+/*
 void sort_testl0l1() {
     std::vector<std::string> v;
     std::vector<int> sizes;
@@ -284,13 +284,12 @@ void test_En_DecodeValueOffset() {
 
     cout << idxx << " " << off1 << endl;
 }
-
+*/
 void *multi_do(void *args) {
     gpu::SSTEncode *pe = (gpu::SSTEncode *)args;
     pe->DoEncode();
     delete pe;
 }
-
 /*
  * 这里的测试暂时只做关于一个SST的完整测试，包括
  * 1. SST Decode
@@ -313,7 +312,7 @@ void test_full_CPU_GPU(const char *f, uint64_t size) {
     te = END(ts);
     cout << SST.all_kv_ << " : "  << te << endl;
 
-    gpu::SST_kv *pkv = m.h_skv[0];
+    gpu::SST_kv *pkv = m.d_skv[0];
     for (int i = 800; i < 900; ++i) {
         //cout << pkv[i].key_size << " " << pkv[i].value_size << endl;
     }
@@ -321,7 +320,7 @@ void test_full_CPU_GPU(const char *f, uint64_t size) {
     // 2. Sort
     START(ts);
     gpu::SSTSort sort(0, m.h_skv_sorted, NULL);
-    sort.AddLow(SST.all_kv_, m.h_skv[0]);
+    sort.AddLow(SST.all_kv_, m.d_skv[0]);
     sort.Sort();
     te = END(ts);
     cout << sort.out_size_ << " : " << te << endl;

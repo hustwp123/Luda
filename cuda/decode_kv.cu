@@ -61,12 +61,7 @@ HostAndDeviceMemory::HostAndDeviceMemory() {
         filter_meta *ph_fm, *pd_fm;
 
         ph_SST = (char *)malloc(__SST_SIZE + 100 * 1024); // 比设置的SST大100KB
-        ph_gdi = (GDI *)malloc(sizeof(GDI) * CUDA_MAX_GDI_PER_SST);
-        ph_skv = (SST_kv*)malloc(sizeof(SST_kv) * CUDA_MAX_KEY_PER_SST);
-        ph_shared_size = (uint32_t *)malloc(sizeof(uint32_t) * CUDA_MAX_GDI_PER_SST);
-        ph_so = (uint32_t *)malloc(sizeof(uint32_t) * CUDA_MAX_GDI_PER_SST);
-        ph_fm = (filter_meta *)malloc(sizeof(filter_meta) * CUDA_MAX_GDI_PER_SST);
-        assert(ph_SST && ph_gdi && ph_skv && ph_shared_size && ph_so && ph_fm);
+        //assert(ph_SST && ph_gdi && ph_skv && ph_shared_size && ph_so && ph_fm);
 
         cudaMallocHost((void **)&pd_SST, __SST_SIZE + 100 * 1024);
         cudaMallocHost((void **)&pd_SST_new, __SST_SIZE + 100 * 1024);
@@ -78,11 +73,6 @@ HostAndDeviceMemory::HostAndDeviceMemory() {
         assert(pd_SST && pd_gdi && pd_skv && pd_shared_size && pd_so);
 
         h_SST.push_back(ph_SST);
-        h_gdi.push_back(ph_gdi);
-        h_skv.push_back(ph_skv);
-        h_shared_size.push_back(ph_shared_size);
-        h_shared_offset.push_back(ph_so);
-        h_fmeta.push_back(ph_fm);
 
         d_SST.push_back(pd_SST);
         ptr[i] = pd_SST;
@@ -120,11 +110,6 @@ HostAndDeviceMemory::~HostAndDeviceMemory() {
 
     for (int i = 0; i < CUDA_MAX_COMPACTION_FILES; ++i) {
         free(h_SST[i]);
-        free(h_gdi[i]);
-        free(h_skv[i]);
-        free(h_shared_size[i]);
-        free(h_shared_offset[i]);
-        free(h_fmeta[i]);
 
         cudaFreeHost(d_SST[i]);
         cudaFreeHost(d_SST_new[i]);
@@ -212,7 +197,7 @@ void SSTDecode::DoGPUDecode() {
     // It can all be ASYNC
     //printf("DoGPUDecode() host:%p device:%p\n", h_SST_, d_SST_);
     cudaMemcpy(d_SST_, h_SST_, file_size_, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_gdi_, h_gdi_, sizeof(GDI) * shared_cnt_, cudaMemcpyHostToDevice);
+    //cudaMemcpy(d_gdi_, h_gdi_, sizeof(GDI) * shared_cnt_, cudaMemcpyHostToDevice);
 
     // cudaMemcpy: h_SST, h_gdi,  == > GPU
     //printf("gdi:%d\n", shared_cnt_);
@@ -220,7 +205,7 @@ void SSTDecode::DoGPUDecode() {
     //cudaDeviceSynchronize();
 
     // cudaMemcpy  h_skv_         <=== GPU
-    cudaMemcpy(h_skv_, d_skv_, sizeof(SST_kv) * all_kv_, cudaMemcpyDeviceToHost);
+    //cudaMemcpy(h_skv_, d_skv_, sizeof(SST_kv) * all_kv_, cudaMemcpyDeviceToHost);
 }
 
 __host__
@@ -233,10 +218,10 @@ void SSTDecode::DoGPUDecode_1(WpSlice* slices,int index) {
     GPUDecodeKernel<<<M, N, 0, s>>>(d_SST_ptr_, SST_idx_, d_gdi_, shared_cnt_, d_skv_,slices,index);
 }
 
-__host__
+// __host__
 void SSTDecode::DoGPUDecode_2() {
     cudaStream_t s = (cudaStream_t) s_.data();
-    cudaMemcpyAsync(h_skv_, d_skv_, sizeof(SST_kv) * all_kv_, cudaMemcpyDeviceToHost, s);
+    // cudaMemcpyAsync(h_skv_, d_skv_, sizeof(SST_kv) * all_kv_, cudaMemcpyDeviceToHost, s);
     s_.Sync();
 }
 __host__
@@ -1006,7 +991,7 @@ void SSTEncode::ComputeDataBlockOffset(int SC) { // SC: shared_count
     for (int i = 0; i < datablock_count_; ++i) {
         int cnt = 0, sc = 0;
         uint32_t boffset = cur_;
-        h_fmeta_[i].start = kv_count_ - kv_cnt_last + base_;
+        d_fmeta_[i].start = kv_count_ - kv_cnt_last + base_;
 
         for (int j = 0; j < SC; ++j) {  // 遍历一个DataBlock中的所有SharedBlock
             int idx = i * SC + j;
@@ -1019,8 +1004,8 @@ void SSTEncode::ComputeDataBlockOffset(int SC) { // SC: shared_count
             cur_ += d_shared_size_[idx];
         }
 
-        h_fmeta_[i].cnt = cnt;
-        kv_cnt_last -= h_fmeta_[i].cnt;
+        d_fmeta_[i].cnt = cnt;
+        kv_cnt_last -= d_fmeta_[i].cnt;
 
         // write the restart_[] TO SST
         // Because it will be overwrite by GPU memory, so here we don't write that
@@ -1097,7 +1082,7 @@ void SSTEncode::ComputeFilter() {
 
 __host__
 void SSTEncode::WriteIndexAndFooter() {
-    h_SST_=d_SST_new_;
+    
     footer.metaindex_handle_.offset_ = cur_;
     const char *filter_name = "filter.leveldb.BuiltinBloomFilter2";
     char cbuf[128];
@@ -1146,7 +1131,7 @@ void SSTEncode::WriteIndexAndFooter() {
         footer.index_handle_.offset_ = cur_;
 
         for (int i = 0; i < datablock_count_; ++i) {
-            SST_kv *max_kv = &h_skv_[h_fmeta_[i].start + h_fmeta_[i].cnt - 1 - base_];
+            SST_kv *max_kv = &h_skv_[d_fmeta_[i].start + d_fmeta_[i].cnt - 1 - base_];
             Buffer ibuf(h_SST_ + cur_, 64);
 
             restarts.push_back(cur_ - footer.index_handle_.offset_);
@@ -1204,11 +1189,11 @@ __host__ void SSTEncode::DoEncode() {
     cudaStreamCreate(&s2);
 
     GPUEncodeSharedKernel<<<M, N, 0, s1>>>(d_skv_, d_skv_new_, base_, kv_count_, d_shared_size_);
-    cudaMemcpyAsync(h_shared_size_, d_shared_size_, sizeof(uint32_t ) * shared_count_, cudaMemcpyDeviceToHost, s1);
+    //cudaMemcpyAsync(h_shared_size_, d_shared_size_, sizeof(uint32_t ) * shared_count_, cudaMemcpyDeviceToHost, s1);
     cudaStreamSynchronize(s1);
 
     ComputeDataBlockOffset();
-    cudaMemcpyAsync(d_shared_offset_, h_shared_offset_, sizeof(uint32_t ) * shared_count_, cudaMemcpyHostToDevice, s1);
+    //cudaMemcpyAsync(d_shared_offset_, h_shared_offset_, sizeof(uint32_t ) * shared_count_, cudaMemcpyHostToDevice, s1);
 
     //dim3 block(32, 4), grid(512, 1);
     //dim3 block(32, 16), grid(512, 1);
@@ -1221,7 +1206,7 @@ __host__ void SSTEncode::DoEncode() {
 
     int data_blocks_size = cur_;
     ComputeFilter();
-    cudaMemcpyAsync(d_fmeta_, h_fmeta_, sizeof(filter_meta) * datablock_count_, cudaMemcpyHostToDevice, s2);
+    //cudaMemcpyAsync(d_fmeta_, h_fmeta_, sizeof(filter_meta) * datablock_count_, cudaMemcpyHostToDevice, s2);
     GPUEncodeFilter<<<M, N, 0, s2>>>(d_SST_new_, d_skv_, d_fmeta_, datablock_count_, k, 0);
 
     cudaMemcpyAsync(h_SST_, d_SST_new_, data_blocks_size, cudaMemcpyDeviceToHost, s1);
@@ -1285,6 +1270,8 @@ __host__ void SSTEncode::DoEncode_4() {
     // cudaMemcpyAsync(h_SST_, d_SST_new_, data_blocks_size_, cudaMemcpyDeviceToHost, s1);
     // cudaMemcpyAsync(h_SST_ + filter_handle_.offset_, d_SST_new_ + filter_handle_.offset_, 
     //         filter_end_ - filter_handle_.offset_, cudaMemcpyDeviceToHost, s2);
+
+    h_SST_=d_SST_new_;
 
     WriteIndexAndFooter();
 
