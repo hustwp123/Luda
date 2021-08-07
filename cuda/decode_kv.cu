@@ -93,10 +93,9 @@ HostAndDeviceMemory::HostAndDeviceMemory() {
     //cudaMallocHost((void **)&wp_d_SST, __SST_SIZE + 100 * 1024);
 
     // 排序好的空间申请
-    h_skv_sorted = (SST_kv *)malloc(sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
     cudaMallocHost((void **)&d_skv_sorted, sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
     cudaMallocHost((void **)&d_skv_sorted_shared, sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
-    assert(h_skv_sorted && d_skv_sorted && d_skv_sorted_shared);
+    assert( d_skv_sorted && d_skv_sorted_shared);
 
 
     // d_SST_ptr 申请
@@ -120,7 +119,6 @@ HostAndDeviceMemory::~HostAndDeviceMemory() {
         cudaFreeHost(d_fmeta[i]);
     }
 
-    free(h_skv_sorted);
 
     cudaFree(lowSlices);
     cudaFree(highSlices);

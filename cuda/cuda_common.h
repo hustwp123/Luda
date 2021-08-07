@@ -252,7 +252,6 @@ public:
     std::vector<SST_kv *> d_skv;
 
     // Decode后Sorted排序好的
-    SST_kv *h_skv_sorted;
     SST_kv *d_skv_sorted;
     SST_kv *d_skv_sorted_shared;
 

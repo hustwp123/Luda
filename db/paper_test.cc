@@ -319,7 +319,7 @@ void test_full_CPU_GPU(const char *f, uint64_t size) {
 
     // 2. Sort
     START(ts);
-    gpu::SSTSort sort(0, m.h_skv_sorted, NULL);
+    gpu::SSTSort sort(0, m.d_skv_sorted, NULL);
     sort.AddLow(SST.all_kv_, m.d_skv[0]);
     sort.Sort();
     te = END(ts);
