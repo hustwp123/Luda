@@ -4,15 +4,6 @@
 
 #include "db/db_impl.h"
 
-#include <stdint.h>
-#include <stdio.h>
-
-#include <algorithm>
-#include <atomic>
-#include <set>
-#include <string>
-#include <vector>
-
 #include "db/builder.h"
 #include "db/db_iter.h"
 #include "db/dbformat.h"
@@ -23,11 +14,21 @@
 #include "db/table_cache.h"
 #include "db/version_set.h"
 #include "db/write_batch_internal.h"
+#include <algorithm>
+#include <atomic>
+#include <set>
+#include <stdint.h>
+#include <stdio.h>
+#include <string>
+#include <unistd.h>
+#include <vector>
+
 #include "leveldb/db.h"
 #include "leveldb/env.h"
 #include "leveldb/status.h"
 #include "leveldb/table.h"
 #include "leveldb/table_builder.h"
+
 #include "port/port.h"
 #include "table/block.h"
 #include "table/merger.h"
@@ -37,11 +38,6 @@
 #include "util/mutexlock.h"
 
 #include "cuda/cuda_common.h"
-#include <unistd.h>
-
-
-
-
 
 // GPU_ACCELERATE 1:open, 0:close
 #define GPU_ACCELERATE (1)
@@ -51,99 +47,105 @@ namespace leveldb {
 const int kNumNonTableCacheFiles = 10;
 
 struct write_file {
-	std::string name;
-	gpu::SSTEncode *encode;
+  std::string name;
+  gpu::SSTEncode* encode;
 };
 
-void* thread_write_file(void *arg) {
-	write_file *pf = (write_file *)arg;
-	gpu::SSTEncode *pencode = pf->encode;
+void* thread_write_file(void* arg) {
+  write_file* pf = (write_file*)arg;
+  gpu::SSTEncode* pencode = pf->encode;
 
-	FILE *file = ::fopen(pf->name.data(), "wb");
-	::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
-	::fsync(fileno(file));
-	::fclose(file);
+  FILE* file = ::fopen(pf->name.data(), "wb");
+  ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
+  ::fsync(fileno(file));
+  ::fclose(file);
 
-	delete pencode;
+  delete pencode;
 }
 
+Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
+                              const Options& options, TableCache* table_cache,
+                              Iterator* iter, FileMetaData* meta) {
+  Status s;
+  meta->file_size = 0;
+  iter->SeekToFirst();
 
-Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env, const Options& options,
-        TableCache* table_cache, Iterator* iter, FileMetaData* meta) {
-    Status s;
-    meta->file_size = 0;
-    iter->SeekToFirst();
+  assert(!gpu_write_l0_.load(
+      std::memory_order_relaxed));  // Assume just one thread can call this in
+                                    // one time
+  gpu_write_l0_.store(true, std::memory_order_release);
 
-    assert(!gpu_write_l0_.load(std::memory_order_relaxed)); // Assume just one thread can call this in one time
-    gpu_write_l0_.store(true, std::memory_order_release);
+  std::string fname = TableFileName(dbname, meta->number);
+  if (iter->Valid()) {
+    int kv_cnt = 0;
+    gpu::SST_kv* pskv = m_.h_skv_sorted;
+    char* dst = m_.h_SST[0];
+    int dst_off = 0;
 
-    std::string fname = TableFileName(dbname, meta->number);
-    if (iter->Valid()) {
-        int kv_cnt = 0;
-        gpu::SST_kv *pskv = m_.h_skv_sorted;
-        char *dst = m_.h_SST[0];
-        int dst_off = 0;
+    // Get all key-Value
+    meta->smallest.DecodeFrom(iter->key());
+    for (; iter->Valid(); iter->Next()) {
+      Slice key = iter->key();
+      Slice value = iter->value();
+      meta->largest.DecodeFrom(key);
 
-        // Get all key-Value
-        meta->smallest.DecodeFrom(iter->key());
-        for (; iter->Valid(); iter->Next()) {
-            Slice key = iter->key();
-            Slice value = iter->value();
-            meta->largest.DecodeFrom(key);
+      memcpy(pskv[kv_cnt].ikey, key.data(), key.size());
+      memcpy(dst + dst_off, value.data(), value.size());
+      pskv[kv_cnt].key_size = key.size();
+      pskv[kv_cnt].value_offset =
+          dst_off;  // Because IDX is zero, so do nothing, See
+                    // gpu::EncodeValueOffset()
+      pskv[kv_cnt].value_size = value.size();
 
-            memcpy(pskv[kv_cnt].ikey, key.data(), key.size());
-            memcpy(dst + dst_off, value.data(), value.size());
-            pskv[kv_cnt].key_size = key.size();
-            pskv[kv_cnt].value_offset = dst_off;    // Because IDX is zero, so do nothing, See gpu::EncodeValueOffset()
-            pskv[kv_cnt].value_size = value.size();
-
-			assert(value.size());
-            dst_off += value.size();
-            ++ kv_cnt;
-        }
-
-        // Copy Key Value to GPU
-        ////printf("l0 %s %s cnt:%d\n", fname.data(), meta->largest.DebugString().data(), kv_cnt);
-        gpu::cudaMemHtD(m_.d_SST[0], m_.h_SST[0], dst_off);
-        gpu::cudaMemHtD(m_.d_skv_sorted, m_.h_skv_sorted, sizeof(gpu::SST_kv) * kv_cnt);
-
-        gpu::SSTEncode encode(m_.h_SST[0], kv_cnt, 0);
-        encode.SetMemory(&m_, 0);
-        //encode.DoEncode();
-        encode.DoEncode_1();
-        encode.DoEncode_2();
-        encode.DoEncode_3();
-        encode.DoEncode_4();
-
-        // Finish and check for builder errors
-        meta->file_size = encode.cur_;
-        FILE *f = ::fopen(fname.data(), "wb");
-        ::fwrite(encode.h_SST_, 1, encode.cur_, f);
-        ::fclose(f);
-
-        // Finish and check for file errors
-        if (true) {
-            // Verify that the table is usable
-            Iterator* it = table_cache->NewIterator(ReadOptions(), meta->number,
-                    meta->file_size);
-            s = it->status();
-            delete it;
-        }
+      assert(value.size());
+      dst_off += value.size();
+      ++kv_cnt;
     }
 
-    gpu_write_l0_.store(false, std::memory_order_release);
+    // Copy Key Value to GPU
+    ////printf("l0 %s %s cnt:%d\n", fname.data(),
+    /// meta->largest.DebugString().data(), kv_cnt);
+    gpu::cudaMemHtD(m_.d_SST[0], m_.h_SST[0], dst_off);
+    gpu::cudaMemHtD(m_.d_skv_sorted, m_.h_skv_sorted,
+                    sizeof(gpu::SST_kv) * kv_cnt);
 
-    // Check for input iterator errors
-    if (!iter->status().ok()) {
-        s = iter->status();
-    }
+    gpu::SSTEncode encode(m_.h_SST[0], kv_cnt, 0);
+    encode.SetMemory(&m_, 0);
+    // encode.DoEncode();
+    encode.DoEncode_1();
+    encode.DoEncode_2();
+    encode.DoEncode_3();
+    encode.DoEncode_4();
 
-    if (s.ok() && meta->file_size > 0) {
-        // Keep it
-    } else {
-        env->DeleteFile(fname);
+    // Finish and check for builder errors
+    meta->file_size = encode.cur_;
+    FILE* f = ::fopen(fname.data(), "wb");
+    ::fwrite(encode.h_SST_, 1, encode.cur_, f);
+    ::fclose(f);
+
+    // Finish and check for file errors
+    if (true) {
+      // Verify that the table is usable
+      Iterator* it = table_cache->NewIterator(ReadOptions(), meta->number,
+                                              meta->file_size);
+      s = it->status();
+      delete it;
     }
-    return s;
+  }
+
+  gpu_write_l0_.store(false, std::memory_order_release);
+
+  // Check for input iterator errors
+  if (!iter->status().ok()) {
+    s = iter->status();
+  }
+
+  if (s.ok() && meta->file_size > 0) {
+    // Keep it
+  } else {
+    env->DeleteFile(fname);
+  }
+  return s;
 }
 
 // Information kept for every waiting writer
@@ -255,10 +257,7 @@ DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
       manual_compaction_(nullptr),
       gpu_write_l0_(false),
       versions_(new VersionSet(dbname_, &options_, table_cache_,
-                               &internal_comparator_)) {
-                                 
-
-                               }
+                               &internal_comparator_)) {}
 
 DBImpl::~DBImpl() {
   // Wait for background work to finish.
@@ -643,7 +642,7 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
 
   CompactionStats stats;
   stats.micros = env_->NowMicros() - start_micros;
-  //printf("write 0 :%ld\n", stats.micros);
+  // printf("write 0 :%ld\n", stats.micros);
   stats.bytes_written = meta.file_size;
   stats_[level].Add(stats);
   return s;
@@ -1072,7 +1071,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
       has_current_user_key = false;
       last_sequence_for_key = kMaxSequenceNumber;
     } else {
-
       // 第一次进入，current_user_key可以理解为上次获取的key，如果此时的Key
       // 跟上次还是一样，那就说明是重复的了
       if (!has_current_user_key ||
@@ -1092,7 +1090,8 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
         drop = true;  // (A)
       } else if (ikey.type == kTypeDeletion &&
                  ikey.sequence <= compact->smallest_snapshot &&
-                 // 这个BaseLevelForKey()就是说这个deletion的Key前面levelf + 2没有与之相关的Key了，可以安全删除了
+                 // 这个BaseLevelForKey()就是说这个deletion的Key前面levelf +
+                 // 2没有与之相关的Key了，可以安全删除了
                  compact->compaction->IsBaseLevelForKey(ikey.user_key)) {
         // For this user key:
         // (1) there is no data in higher levels
@@ -1147,7 +1146,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   }
 
   const int64_t duration = env_->NowMicros() - start_micros;
-  //printf("all time:%ld\n", duration - imm_micros);
+  // printf("all time:%ld\n", duration - imm_micros);
 
   if (status.ok() && shutting_down_.load(std::memory_order_acquire)) {
     status = Status::IOError("Deleting DB during compaction");
@@ -1188,353 +1187,375 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 #else
 /*
  * The final VERSION of GPU
-*/
+ */
 Status DBImpl::DoCompactionWork(CompactionState* compact) {
-    const uint64_t start_micros = env_->NowMicros();
-    int64_t imm_micros = 0;  // Micros spent doing imm_ compactions
+  const uint64_t start_micros = env_->NowMicros();
+  int64_t imm_micros = 0;  // Micros spent doing imm_ compactions
 
-    Log(options_.info_log, "Compacting %d@%d + %d@%d files",
-            compact->compaction->num_input_files(0), compact->compaction->level(),
-            compact->compaction->num_input_files(1),
-            compact->compaction->level() + 1);
+  Log(options_.info_log, "Compacting %d@%d + %d@%d files",
+      compact->compaction->num_input_files(0), compact->compaction->level(),
+      compact->compaction->num_input_files(1),
+      compact->compaction->level() + 1);
 
-    assert(versions_->NumLevelFiles(compact->compaction->level()) > 0);
-    assert(compact->builder == nullptr);
-    assert(compact->outfile == nullptr);
-    //printf("Compacting %d@%d + %d@%d files",\
+  assert(versions_->NumLevelFiles(compact->compaction->level()) > 0);
+  assert(compact->builder == nullptr);
+  assert(compact->outfile == nullptr);
+  //printf("Compacting %d@%d + %d@%d files",\
             compact->compaction->num_input_files(0), compact->compaction->level(), \
             compact->compaction->num_input_files(1),\
             compact->compaction->level() + 1);
 
-    if(compact->compaction->num_input_files(0) + compact->compaction->num_input_files(1) > CUDA_MAX_COMPACTION_FILES) {
-		//printf("compact NUMber:%lu\n", compact->compaction->inputs_[0][0]->number);
-		assert(0);
-	}
-    // 寻找最老的快照，只要sqenum比这个值还小，那就说明是需要删除的
-    if (snapshots_.empty()) {
-        compact->smallest_snapshot = versions_->LastSequence();
-    } else {
-        compact->smallest_snapshot = snapshots_.oldest()->sequence_number();
-    }
+  if (compact->compaction->num_input_files(0) +
+          compact->compaction->num_input_files(1) >
+      CUDA_MAX_COMPACTION_FILES) {
+    // printf("compact NUMber:%lu\n",
+    // compact->compaction->inputs_[0][0]->number);
+    assert(0);
+  }
+  // 寻找最老的快照，只要sqenum比这个值还小，那就说明是需要删除的
+  if (snapshots_.empty()) {
+    compact->smallest_snapshot = versions_->LastSequence();
+  } else {
+    compact->smallest_snapshot = snapshots_.oldest()->sequence_number();
+  }
 
-    // Release mutex while we're actually doing the compaction work
-    mutex_.Unlock();
+  // Release mutex while we're actually doing the compaction work
+  mutex_.Unlock();
 
-    // 两层迭代器，遍历inputs_[2]中的所有KV
-    ///////////// BEGIN ///////////////////
-    //
-    // NEED_DO:
-    //1. 遍历compaction->inputs_[2]两层file，然后把对应的SST读取Decode、Sort、Encode
-    // 2. Encode时候下写文件系统
-    //    1) 名字要符合本身的设定
-    //    2) 对应的FileMata也要填写
-    //    3) compact->outfile
-    //
+  // 两层迭代器，遍历inputs_[2]中的所有KV
+  ///////////// BEGIN ///////////////////
+  //
+  // NEED_DO:
+  // 1.
+  // 遍历compaction->inputs_[2]两层file，然后把对应的SST读取Decode、Sort、Encode
+  // 2. Encode时候下写文件系统
+  //    1) 名字要符合本身的设定
+  //    2) 对应的FileMata也要填写
+  //    3) compact->outfile
+  //
 #if 0
-#define IMM_WRITE() do { \
-    if (has_imm_.load(std::memory_order_relaxed)) {\
-        const uint64_t imm_start = env_->NowMicros();\
-        mutex_.Lock();\
-        if (imm_ != nullptr) {\
-            CompactMemTable();\
-            background_work_finished_signal_.SignalAll();\
-        }\
-        mutex_.Unlock();\
-        imm_micros += (env_->NowMicros() - imm_start);\
-    }\
-} while(0)
+#define IMM_WRITE()                                   \
+  do {                                                \
+    if (has_imm_.load(std::memory_order_relaxed)) {   \
+      const uint64_t imm_start = env_->NowMicros();   \
+      mutex_.Lock();                                  \
+      if (imm_ != nullptr) {                          \
+        CompactMemTable();                            \
+        background_work_finished_signal_.SignalAll(); \
+      }                                               \
+      mutex_.Unlock();                                \
+      imm_micros += (env_->NowMicros() - imm_start);  \
+    }                                                 \
+  } while (0)
 #else
 #define IMM_WRITE()
 #endif
 
-    IMM_WRITE();
+  IMM_WRITE();
 
-    uint64_t compaction_start = env_->NowMicros();
-    uint64_t real_start = env_->NowMicros();
-    // Decode SST
-    std::vector<gpu::SSTDecode *> low_decode, high_decode;
-    int sst_idx = 0;
-    for (auto &low : compact->compaction->inputs_[0]) {
-        std::string filename = TableFileName(dbname_, low->number);
-        ////printf("%s ", filename.data());
-        gpu::SSTDecode *p = new gpu::SSTDecode(filename.data(), low->file_size, m_.h_SST[sst_idx]);
-        p->SetMemory(sst_idx ++, &m_);
-        low_decode.push_back(p);
+  uint64_t compaction_start = env_->NowMicros();
+  uint64_t real_start = env_->NowMicros();
+  // Decode SST
+  std::vector<gpu::SSTDecode*> low_decode, high_decode;
+  int sst_idx = 0;
+  for (auto& low : compact->compaction->inputs_[0]) {
+    std::string filename = TableFileName(dbname_, low->number);
+    ////printf("%s ", filename.data());
+    gpu::SSTDecode* p =
+        new gpu::SSTDecode(filename.data(), low->file_size, m_.h_SST[sst_idx]);
+    p->SetMemory(sst_idx++, &m_);
+    low_decode.push_back(p);
+  }
+
+  IMM_WRITE();
+  for (auto& high : compact->compaction->inputs_[1]) {
+    std::string filename = TableFileName(dbname_, high->number);
+    ////printf("%s ", filename.data());
+    gpu::SSTDecode* p =
+        new gpu::SSTDecode(filename.data(), high->file_size, m_.h_SST[sst_idx]);
+    p->SetMemory(sst_idx++, &m_);
+    high_decode.push_back(p);
+  }
+  uint64_t duration = (env_->NowMicros() - compaction_start);
+  compaction_start = env_->NowMicros();
+  // printf("read-files time:%ld ", duration);
+
+  IMM_WRITE();
+
+  // Encode AND Sort
+  gpu::SSTCompactionUtil util(compact->compaction->input_version_,
+                              compact->compaction->level());
+  gpu::SSTSort sort(compact->smallest_snapshot, m_.h_skv_sorted, &util,
+                    m_.d_skv_sorted);
+  bool useWP = (compact->compaction->level() != 0);
+  // bool useWP=false;
+  int low_kvs = 0;
+  int high_kvs = 0;
+
+  for (auto& p : low_decode) {
+    p->DoDecode();
+    low_kvs += p->all_kv_;
+  }
+  for (auto& p : high_decode) {
+    p->DoDecode();
+    high_kvs += p->all_kv_;
+  }
+  IMM_WRITE();
+  if (useWP) {
+    // printf("alloc1 size: %d\n",low_kvs);
+    sort.AllocLow(low_kvs, &m_);
+    // printf("alloc2 size:%d\n",high_kvs);
+    sort.AllocHigh(high_kvs, &m_);
+
+    // printf("end\n");
+    sort.num = low_kvs + high_kvs;
+    sort.low_num = low_kvs;
+    sort.high_num = high_kvs;
+    sort.AllocResult(sort.num, &m_);
+  }
+
+  // printf("low_keys:%d high_keys:%d\n",low_kvs,high_kvs);
+  int low_index = 0;
+  int high_index = 0;
+  if (!useWP) {
+    for (auto& p : low_decode) {
+      p->DoGPUDecode_1();
     }
-
-    IMM_WRITE();
-    for (auto &high : compact->compaction->inputs_[1]) {
-        std::string filename = TableFileName(dbname_, high->number);
-        ////printf("%s ", filename.data());
-        gpu::SSTDecode *p = new gpu::SSTDecode(filename.data(), high->file_size, m_.h_SST[sst_idx]);
-        p->SetMemory(sst_idx ++, &m_);
-        high_decode.push_back(p);
+    for (auto& p : high_decode) {
+      p->DoGPUDecode_1();
     }
-    uint64_t duration = (env_->NowMicros() - compaction_start);
-    compaction_start = env_->NowMicros();
-    //printf("read-files time:%ld ", duration);
-
-    IMM_WRITE();
-
-    // Encode AND Sort
-    gpu::SSTCompactionUtil util(compact->compaction->input_version_, compact->compaction->level());
-    gpu::SSTSort sort(compact->smallest_snapshot, m_.h_skv_sorted, &util,m_.d_skv_sorted);
-    bool useWP=(compact->compaction->level() != 0);
-    //bool useWP=false;
-    int low_kvs=0;
-    int high_kvs=0;
-
-    for (auto &p : low_decode ) {
-       p->DoDecode(); 
-       low_kvs+=p->all_kv_;
+  } else {
+    for (auto& p : low_decode) {
+      p->DoGPUDecode_1(sort.low_slices + low_index);
+      low_index += p->all_kv_;
     }
-    for (auto &p : high_decode) {
-       p->DoDecode();
-       high_kvs+=p->all_kv_; 
+    for (auto& p : high_decode) {
+      p->DoGPUDecode_1(sort.high_slices + high_index);
+      high_index += p->all_kv_;
     }
-    IMM_WRITE();
-    if(useWP)
-    {
-      //printf("alloc1 size: %d\n",low_kvs);
-      sort.AllocLow(low_kvs,&m_);
-      //printf("alloc2 size:%d\n",high_kvs);
-      sort.AllocHigh(high_kvs,&m_);
-      
-      //printf("end\n");
-      sort.num=low_kvs+high_kvs;
-      sort.low_num=low_kvs;
-      sort.high_num=high_kvs;
-      sort.AllocResult(sort.num,&m_);
-    }
+  }
 
-    //printf("low_keys:%d high_keys:%d\n",low_kvs,high_kvs);
-    int low_index=0;
-    int high_index=0;
-    for (auto &p : low_decode ) {
-      if(useWP)
-      {
-        p->DoGPUDecode_1(sort.low_slices+low_index); 
-        low_index+=p->all_kv_;
+  IMM_WRITE();
+
+  low_index = 0;
+  high_index = 0;
+  if (!useWP) {
+    for (auto& p : low_decode) {
+      p->DoGPUDecode_2();
+    }
+    for (auto& p : high_decode) {
+      p->DoGPUDecode_2();
+    }
+  } else {
+    for (auto& p : low_decode) {
+      p->DoGPUDecode_2(sort.low_slices, low_index);
+      low_index += p->all_kv_;
+    }
+    for (auto& p : high_decode) {
+      p->DoGPUDecode_2(sort.high_slices, high_index);
+      high_index += p->all_kv_;
+    }
+  }
+
+  IMM_WRITE();
+
+  if (!useWP) {
+    for (auto& p : low_decode) {
+      if (compact->compaction->level() == 0) {
+        sort.AddL0(p->all_kv_, p->h_skv_);
+      } else {
+        sort.AddLow(p->all_kv_, p->h_skv_);
       }
-      else
-      {
-        p->DoGPUDecode_1();
-      }
-       
+      delete p;
     }
-    for (auto &p : high_decode) {
-      if(useWP)
-      {
-        p->DoGPUDecode_1(sort.high_slices+high_index);
-        high_index+=p->all_kv_; 
-      }
-      else
-      {
-        p->DoGPUDecode_1();
-      }
-       
+    for (auto& p : high_decode) {
+      sort.AddHigh(p->all_kv_, p->h_skv_);
+      delete p;
     }
-    
-    IMM_WRITE();
+  }
 
-    for (auto &p : low_decode ) { p->DoGPUDecode_2(); }
-    for (auto &p : high_decode) { p->DoGPUDecode_2(); }
-    IMM_WRITE();
+  IMM_WRITE();
 
-    if(!useWP)
-    {
-      for (auto &p : low_decode ) {
-        if (compact->compaction->level() == 0) {
-            sort.AddL0(p->all_kv_, p->h_skv_);
-        } else {
-            sort.AddLow(p->all_kv_, p->h_skv_,p->d_skv_);
-        }
-        delete p;
-      }
-      for (auto &p : high_decode) { 
-        sort.AddHigh(p->all_kv_, p->h_skv_,p->d_skv_); 
-        delete p;
-      }
+  duration = (env_->NowMicros() - compaction_start);
+  compaction_start = env_->NowMicros();
+  // printf("decode time:%ld ", duration);
+
+  if (useWP) {
+    sort.WpSort();
+    for (auto& p : low_decode) {
+      delete p;
     }
-    
-    IMM_WRITE();
-
-    duration = (env_->NowMicros() - compaction_start);
-    compaction_start = env_->NowMicros();
-    //printf("decode time:%ld ", duration);
-
-    if(useWP)
-    {
-      sort.WpSort();
-      for (auto &p : low_decode ) {
-        delete p;
-      }
-      for (auto &p : high_decode) { 
-        delete p;
-      }
+    for (auto& p : high_decode) {
+      delete p;
     }
-    else
-    {
-      sort.Sort();
-    }
-    
+  } else {
+    sort.Sort();
+  }
 
-    IMM_WRITE();
+  IMM_WRITE();
 
-    duration = (env_->NowMicros() - compaction_start);
-    compaction_start = env_->NowMicros();
-    //printf("Sort time:%ld ", duration);
+  duration = (env_->NowMicros() - compaction_start);
+  compaction_start = env_->NowMicros();
+  // printf("Sort time:%ld ", duration);
 
-    //Encode
-    gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_, sizeof(gpu::SST_kv) * sort.out_size_);
+  // Encode
+  gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_,
+                  sizeof(gpu::SST_kv) * sort.out_size_);
 
-    // if(!useWP)
-    // {
-    //   //Encode
-    //   gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_, sizeof(gpu::SST_kv) * sort.out_size_);
-    // }
-    
+  // if(!useWP)
+  // {
+  //   //Encode
+  //   gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_, sizeof(gpu::SST_kv) *
+  //   sort.out_size_);
+  // }
 
-    int last_keys = sort.out_size_;
-    int keys_per_SST = gpu::kSharedKeys * gpu::kSharedPerSST;
-    int SST_cnt = (sort.out_size_  + keys_per_SST - 1) / keys_per_SST;
+  int last_keys = sort.out_size_;
+  int keys_per_SST = gpu::kSharedKeys * gpu::kSharedPerSST;
+  int SST_cnt = (sort.out_size_ + keys_per_SST - 1) / keys_per_SST;
 
-    // Compute SST number
-    std::vector<int> SST_kv_cnts;
-    int keys = 0, file_size = 0;;
-    //printf(" (%d) ", sort.out_size_);
-    for (int i = 0; i < last_keys; ++i) {
-        gpu::SST_kv *pskv = sort.out_;
+  // Compute SST number
+  std::vector<int> SST_kv_cnts;
+  int keys = 0, file_size = 0;
+  ;
+  // printf(" (%d) ", sort.out_size_);
+  for (int i = 0; i < last_keys; ++i) {
+    gpu::SST_kv* pskv = sort.out_;
 
-        file_size += pskv[i].value_size + pskv[i].key_size;
+    file_size += pskv[i].value_size + pskv[i].key_size;
 
-        Slice key(sort.out_[i].ikey, sort.out_[i].key_size);
-        if (compact->compaction->ShouldStopBefore(key) 
-            || keys >= keys_per_SST
-            || file_size >= compact->compaction->MaxOutputFileSize()
-			|| file_size >= (15 * 1024 * 1024)) {
-			
-            SST_kv_cnts.push_back(keys);
-            ////printf(" [%d] ", keys);
-            keys = 0;
-            file_size = 0;
-        }
-
-        ++ keys;
+    Slice key(sort.out_[i].ikey, sort.out_[i].key_size);
+    if (compact->compaction->ShouldStopBefore(key) || keys >= keys_per_SST ||
+        file_size >= compact->compaction->MaxOutputFileSize() ||
+        file_size >= (15 * 1024 * 1024)) {
+      SST_kv_cnts.push_back(keys);
+      ////printf(" [%d] ", keys);
+      keys = 0;
+      file_size = 0;
     }
 
-    if (keys) {
-        SST_kv_cnts.push_back(keys);
-        ////printf(" [%d] ", keys);
-    }
+    ++keys;
+  }
 
-	assert(SST_kv_cnts.size() <= CUDA_MAX_COMPACTION_FILES);
+  if (keys) {
+    SST_kv_cnts.push_back(keys);
+    ////printf(" [%d] ", keys);
+  }
 
-    //Write All SST
-    std::vector<gpu::SSTEncode *> encodes;
-    //for (int i = 0; i < SST_cnt; ++i) {
-    for (int i = 0; i < SST_kv_cnts.size(); ++i) {
-        //int kv_cnt = keys_per_SST <= last_keys ? keys_per_SST : last_keys;
-        int kv_cnt = SST_kv_cnts[i];
-        gpu::SSTEncode *p = new gpu::SSTEncode(m_.h_SST[i], kv_cnt, i);
-        p->SetMemory(&m_, sort.out_size_ - last_keys);
-        last_keys -= kv_cnt;
-        encodes.push_back(p);
-    }
-    IMM_WRITE();
-    for (auto &p : encodes) { p->DoEncode_1(); }
-    IMM_WRITE();
-    for (auto &p : encodes) { p->DoEncode_2(); }
-    IMM_WRITE();
-    for (auto &p : encodes) { p->DoEncode_3(); }
-    IMM_WRITE();
-    for (auto &p : encodes) { p->DoEncode_4(); }
-    IMM_WRITE();
+  assert(SST_kv_cnts.size() <= CUDA_MAX_COMPACTION_FILES);
 
-    last_keys = sort.out_size_;
-    duration = (env_->NowMicros() - compaction_start);
-    compaction_start = env_->NowMicros();
-    //printf("encode time:%ld ", duration);
+  // Write All SST
+  std::vector<gpu::SSTEncode*> encodes;
+  // for (int i = 0; i < SST_cnt; ++i) {
+  for (int i = 0; i < SST_kv_cnts.size(); ++i) {
+    // int kv_cnt = keys_per_SST <= last_keys ? keys_per_SST : last_keys;
+    int kv_cnt = SST_kv_cnts[i];
+    gpu::SSTEncode* p = new gpu::SSTEncode(m_.h_SST[i], kv_cnt, i);
+    p->SetMemory(&m_, sort.out_size_ - last_keys);
+    last_keys -= kv_cnt;
+    encodes.push_back(p);
+  }
+  IMM_WRITE();
+  for (auto& p : encodes) {
+    p->DoEncode_1();
+  }
+  IMM_WRITE();
+  for (auto& p : encodes) {
+    p->DoEncode_2();
+  }
+  IMM_WRITE();
+  for (auto& p : encodes) {
+    p->DoEncode_3();
+  }
+  IMM_WRITE();
+  for (auto& p : encodes) {
+    p->DoEncode_4();
+  }
+  IMM_WRITE();
 
-	pthread_t tidp[SST_kv_cnts.size()];
-	write_file wr[SST_kv_cnts.size()];
+  last_keys = sort.out_size_;
+  duration = (env_->NowMicros() - compaction_start);
+  compaction_start = env_->NowMicros();
+  // printf("encode time:%ld ", duration);
 
-    for (int i = 0; i < SST_kv_cnts.size(); ++i) {
-        //int kv_cnt = keys_per_SST <= last_keys ? keys_per_SST : last_keys;
-        int kv_cnt = SST_kv_cnts[i];
-        gpu::SSTEncode *pencode = encodes[i];
+  pthread_t tidp[SST_kv_cnts.size()];
+  write_file wr[SST_kv_cnts.size()];
 
-        // Write One SST
-        gpu::SST_kv *p = m_.h_skv_sorted;
-        int kv_start = sort.out_size_ - last_keys;
-        Slice smallerst(p[kv_start].ikey, p[kv_start].key_size);
-        Slice largest(p[kv_start + kv_cnt - 1].ikey, p[kv_start + kv_cnt - 1].key_size);
+  for (int i = 0; i < SST_kv_cnts.size(); ++i) {
+    // int kv_cnt = keys_per_SST <= last_keys ? keys_per_SST : last_keys;
+    int kv_cnt = SST_kv_cnts[i];
+    gpu::SSTEncode* pencode = encodes[i];
 
-        mutex_.Lock();
-        uint64_t file_number = versions_->NewFileNumber();
-        pending_outputs_.insert(file_number);
-        CompactionState::Output out;
-        out.number = file_number;
-        out.smallest.DecodeFrom(smallerst);
-        out.largest.DecodeFrom(largest);
-        out.file_size = pencode->cur_;
-        compact->outputs.push_back(out);
-        mutex_.Unlock();
-
-        // Write SST
-        compact->total_bytes += out.file_size;
-        std::string name = TableFileName(dbname_, out.number);
-        ////printf("(%s %d) ", name.data(), kv_cnt);
-
-		/*
-        FILE *file = ::fopen(name.data(), "wb");
-        ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
-		::fsync(fileno(file));
-        ::fclose(file);
-		*/
-		wr[i].name = name;
-		wr[i].encode = pencode;
-		pthread_create(&tidp[i], NULL, thread_write_file, (void *)&wr[i]);
-
-        last_keys -= kv_cnt;
-        //delete pencode;
-    }
-
-    for (int i = 0; i < SST_kv_cnts.size(); ++i) {
-		pthread_join(tidp[i], NULL);
-	}
-
-    duration = (env_->NowMicros() - compaction_start);
-    //printf("writefiles time:%ld \n", duration);
-    duration = (env_->NowMicros() - real_start);
-    //printf("all time:%ld\n", duration);
-    /////////////// END ///////////////////////
-
-    CompactionStats stats;
-    stats.micros = env_->NowMicros() - start_micros - imm_micros;
-    for (int which = 0; which < 2; which++) {
-        for (int i = 0; i < compact->compaction->num_input_files(which); i++) {
-            stats.bytes_read += compact->compaction->input(which, i)->file_size;
-        }
-    }
-    for (size_t i = 0; i < compact->outputs.size(); i++) {
-        stats.bytes_written += compact->outputs[i].file_size;
-    }
+    // Write One SST
+    gpu::SST_kv* p = m_.h_skv_sorted;
+    int kv_start = sort.out_size_ - last_keys;
+    Slice smallerst(p[kv_start].ikey, p[kv_start].key_size);
+    Slice largest(p[kv_start + kv_cnt - 1].ikey,
+                  p[kv_start + kv_cnt - 1].key_size);
 
     mutex_.Lock();
-    stats_[compact->compaction->level() + 1].Add(stats);
+    uint64_t file_number = versions_->NewFileNumber();
+    pending_outputs_.insert(file_number);
+    CompactionState::Output out;
+    out.number = file_number;
+    out.smallest.DecodeFrom(smallerst);
+    out.largest.DecodeFrom(largest);
+    out.file_size = pencode->cur_;
+    compact->outputs.push_back(out);
+    mutex_.Unlock();
 
-    Status status;
-    status = InstallCompactionResults(compact);
-    if (!status.ok()) {
-        RecordBackgroundError(status);
+    // Write SST
+    compact->total_bytes += out.file_size;
+    std::string name = TableFileName(dbname_, out.number);
+    ////printf("(%s %d) ", name.data(), kv_cnt);
+
+    /*
+FILE *file = ::fopen(name.data(), "wb");
+::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
+    ::fsync(fileno(file));
+::fclose(file);
+    */
+    wr[i].name = name;
+    wr[i].encode = pencode;
+    pthread_create(&tidp[i], NULL, thread_write_file, (void*)&wr[i]);
+
+    last_keys -= kv_cnt;
+    // delete pencode;
+  }
+
+  for (int i = 0; i < SST_kv_cnts.size(); ++i) {
+    pthread_join(tidp[i], NULL);
+  }
+
+  duration = (env_->NowMicros() - compaction_start);
+  // printf("writefiles time:%ld \n", duration);
+  duration = (env_->NowMicros() - real_start);
+  // printf("all time:%ld\n", duration);
+  /////////////// END ///////////////////////
+
+  CompactionStats stats;
+  stats.micros = env_->NowMicros() - start_micros - imm_micros;
+  for (int which = 0; which < 2; which++) {
+    for (int i = 0; i < compact->compaction->num_input_files(which); i++) {
+      stats.bytes_read += compact->compaction->input(which, i)->file_size;
     }
-    VersionSet::LevelSummaryStorage tmp;
-    Log(options_.info_log, "compacted to: %s", versions_->LevelSummary(&tmp));
-    return status;
+  }
+  for (size_t i = 0; i < compact->outputs.size(); i++) {
+    stats.bytes_written += compact->outputs[i].file_size;
+  }
+
+  mutex_.Lock();
+  stats_[compact->compaction->level() + 1].Add(stats);
+
+  Status status;
+  status = InstallCompactionResults(compact);
+  if (!status.ok()) {
+    RecordBackgroundError(status);
+  }
+  VersionSet::LevelSummaryStorage tmp;
+  Log(options_.info_log, "compacted to: %s", versions_->LevelSummary(&tmp));
+  return status;
 }
 #endif
-
 
 namespace {
 
@@ -1625,11 +1646,11 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
     mutex_.Unlock();
     // First look in the memtable, then in the immutable memtable (if any).
     LookupKey lkey(key, snapshot);
-    if (mem->Get(lkey, value, &s)) { // mem Get
+    if (mem->Get(lkey, value, &s)) {  // mem Get
       // Done
-    } else if (imm != nullptr && imm->Get(lkey, value, &s)) { // Imm Get
+    } else if (imm != nullptr && imm->Get(lkey, value, &s)) {  // Imm Get
       // Done
-    } else {        // SST get
+    } else {  // SST get
       s = current->Get(options, lkey, value, &stats);
       have_stat_update = true;
     }
@@ -1827,7 +1848,8 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       // this delay hands over some CPU to the compaction thread in
       // case it is sharing the same core as the writer.
       mutex_.Unlock();
-      env_->SleepForMicroseconds(1000);     // 这里需要睡眠等待1ms， 这样IOPS就会限制到1000以下
+      env_->SleepForMicroseconds(
+          1000);  // 这里需要睡眠等待1ms， 这样IOPS就会限制到1000以下
       allow_delay = false;  // Do not delay a single write more than once
       mutex_.Lock();
     } else if (!force &&
@@ -1844,7 +1866,8 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       Log(options_.info_log, "Too many L0 files; waiting...\n");
       background_work_finished_signal_.Wait();
     } else {
-      // 将Memtable 转换成 Immtable，然后会尝试启动后台compaction()线程，看是否有需求
+      // 将Memtable 转换成
+      // Immtable，然后会尝试启动后台compaction()线程，看是否有需求
 
       // Attempt to switch to a new memtable and trigger compaction of old
       assert(versions_->PrevLogNumber() == 0);

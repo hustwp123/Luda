@@ -43,8 +43,10 @@ public:
     int value_size;
     char *data_;
     size_t key_size;
+    char* ikey;
+    
 
-    SST_kv* skv;
+    //SST_kv* skv;
 };
 
 class Stream {
@@ -307,7 +309,7 @@ public:
 
      // Async Decode
      void DoGPUDecode_1(WpSlice* slices=nullptr,int index=0);
-     void DoGPUDecode_2();
+     void DoGPUDecode_2(WpSlice* slices=nullptr,int index=0);
 
     int all_kv_;
 
@@ -380,28 +382,17 @@ public:
         l0_skvs_.push_back(skv);
     }
 
-     void AddLow(int size, SST_kv* skv, SST_kv* skv2=nullptr) {
+     void AddLow(int size, SST_kv* skv) {
         low_sizes_.push_back(size);
         low_idx_.push_back(0);
         low_skvs_.push_back(skv);
-        if(skv2)
-        {
-            low_skvs_2.push_back(skv2);
-            low_kvs+=size;
-        }
         
     }
 
-     void AddHigh(int size, SST_kv* skv,SST_kv* skv2=nullptr) {
+     void AddHigh(int size, SST_kv* skv) {
         high_sizes_.push_back(size);
         high_idx_.push_back(0);
         high_skvs_.push_back(skv);
-        if(skv2)
-        {
-            high_skvs_2.push_back(skv2);
-            high_kvs+=size;
-        }
-        
     }
 
      void WpSort();
@@ -428,16 +419,10 @@ private:
     std::vector<int>     low_sizes_;
     std::vector<int>     low_idx_;
     std::vector<SST_kv*> low_skvs_;
-    int low_kvs=0;
-
-    std::vector<SST_kv*> low_skvs_2;
 
     std::vector<int>     high_sizes_;
     std::vector<int>     high_idx_;
     std::vector<SST_kv*> high_skvs_;
-    int high_kvs=0;
-
-    std::vector<SST_kv*> high_skvs_2;
 
     int low_sst_index_;     // low level first SST
     int high_sst_index_;    // high level first SST
