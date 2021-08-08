@@ -68,13 +68,13 @@ HostAndDeviceMemory::HostAndDeviceMemory() {
         ph_fm = (filter_meta *)malloc(sizeof(filter_meta) * CUDA_MAX_GDI_PER_SST);
         assert(ph_SST && ph_gdi && ph_skv && ph_shared_size && ph_so && ph_fm);
 
-        cudaMallocHost((void **)&pd_SST, __SST_SIZE + 100 * 1024);
-        cudaMallocHost((void **)&pd_SST_new, __SST_SIZE + 100 * 1024);
-        cudaMallocHost((void **)&pd_gdi, sizeof(GDI) * CUDA_MAX_GDI_PER_SST);
+        cudaMalloc((void **)&pd_SST, __SST_SIZE + 100 * 1024);
+        cudaMalloc((void **)&pd_SST_new, __SST_SIZE + 100 * 1024);
+        cudaMalloc((void **)&pd_gdi, sizeof(GDI) * CUDA_MAX_GDI_PER_SST);
         cudaMallocHost((void **)&pd_skv, sizeof(SST_kv) * CUDA_MAX_KEY_PER_SST);
-        cudaMallocHost((void **)&pd_shared_size, sizeof(uint32_t) * CUDA_MAX_GDI_PER_SST);
-        cudaMallocHost((void **)&pd_so, sizeof(uint32_t) * CUDA_MAX_GDI_PER_SST);
-        cudaMallocHost((void **)&pd_fm, sizeof(filter_meta) * CUDA_MAX_GDI_PER_SST);
+        cudaMalloc((void **)&pd_shared_size, sizeof(uint32_t) * CUDA_MAX_GDI_PER_SST);
+        cudaMalloc((void **)&pd_so, sizeof(uint32_t) * CUDA_MAX_GDI_PER_SST);
+        cudaMalloc((void **)&pd_fm, sizeof(filter_meta) * CUDA_MAX_GDI_PER_SST);
         assert(pd_SST && pd_gdi && pd_skv && pd_shared_size && pd_so);
 
         h_SST.push_back(ph_SST);
@@ -99,17 +99,17 @@ HostAndDeviceMemory::HostAndDeviceMemory() {
     result_size=200000;
     cudaMalloc((void **)&lowSlices, sizeof(WpSlice) * low_size);
     cudaMalloc((void **)&highSlices, sizeof(WpSlice) * high_size);
-    cudaMallocHost((void **)&resultSlice, sizeof(WpSlice) * result_size);
+    cudaMalloc((void **)&resultSlice, sizeof(WpSlice) * result_size);
 
     // 排序好的空间申请
     h_skv_sorted = (SST_kv *)malloc(sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
-    cudaMallocHost((void **)&d_skv_sorted, sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
-    cudaMallocHost((void **)&d_skv_sorted_shared, sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
+    cudaMalloc((void **)&d_skv_sorted, sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
+    cudaMalloc((void **)&d_skv_sorted_shared, sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
     assert(h_skv_sorted && d_skv_sorted && d_skv_sorted_shared);
 
 
     // d_SST_ptr 申请
-    cudaMallocHost((void **)&d_SST_ptr, sizeof(char *) * CUDA_MAX_COMPACTION_FILES);
+    cudaMalloc((void **)&d_SST_ptr, sizeof(char *) * CUDA_MAX_COMPACTION_FILES);
     cudaMemcpy((void *)d_SST_ptr, (void *)ptr, sizeof(char *) * CUDA_MAX_COMPACTION_FILES, cudaMemcpyHostToDevice);
 }
 
@@ -125,23 +125,23 @@ HostAndDeviceMemory::~HostAndDeviceMemory() {
         free(h_shared_offset[i]);
         free(h_fmeta[i]);
 
-        cudaFreeHost(d_SST[i]);
-        cudaFreeHost(d_SST_new[i]);
-        cudaFreeHost(d_gdi[i]);
-        cudaFreeHost(d_skv[i]);
-        cudaFreeHost(d_shared_size[i]);
-        cudaFreeHost(d_shared_offset[i]);
-        cudaFreeHost(d_fmeta[i]);
+        cudaFree(d_SST[i]);
+        cudaFree(d_SST_new[i]);
+        cudaFree(d_gdi[i]);
+        cudaFree(d_skv[i]);
+        cudaFree(d_shared_size[i]);
+        cudaFree(d_shared_offset[i]);
+        cudaFree(d_fmeta[i]);
     }
 
     free(h_skv_sorted);
 
     cudaFree(lowSlices);
     cudaFree(highSlices);
-    cudaFreeHost(resultSlice);
+    cudaFree(resultSlice);
 
-    cudaFreeHost(d_skv_sorted);
-    cudaFreeHost(d_skv_sorted_shared);
+    cudaFree(d_skv_sorted);
+    cudaFree(d_skv_sorted_shared);
 }
 
 //////////// Decodde /////////////////////////////
@@ -756,22 +756,11 @@ void SSTSort::AllocLow(int size,HostAndDeviceMemory* m)
     }
     else
     {
-        cudaFreeHost(m->lowSlices);
-        cudaMallocHost((void **)&(m->lowSlices), sizeof(WpSlice) * size);
+        cudaFree(m->lowSlices);
+        cudaMalloc((void **)&(m->lowSlices), sizeof(WpSlice) * size);
         m->low_size=size;
         low_slices=m->lowSlices;
     }
-    // cudaMallocHost((void **)&low_slices, sizeof(WpSlice) * size);
-    // if(low_slices==nullptr&&size!=0)
-    // {
-    //     printf("error1\n");
-    //     exit(-1);
-    // }
-    // for(int i=0;i<size;i++)
-    // {
-    //     low_slices[i].drop=false;
-    //     low_slices[i].seq_=seq_;
-    // }
 }
 void SSTSort::AllocHigh(int size,HostAndDeviceMemory* m)
 {
@@ -781,22 +770,11 @@ void SSTSort::AllocHigh(int size,HostAndDeviceMemory* m)
     }
     else
     {
-        cudaFreeHost(m->highSlices);
-        cudaMallocHost((void **)&(m->highSlices), sizeof(WpSlice) * size);
+        cudaFree(m->highSlices);
+        cudaMalloc((void **)&(m->highSlices), sizeof(WpSlice) * size);
         m->high_size=size;
         high_slices=m->highSlices;
     }
-    // cudaMallocHost((void **)&high_slices, sizeof(WpSlice) * size);
-    // if(high_slices==nullptr&&size!=0)
-    // {
-    //     printf("error2\n");
-    //     exit(-1);
-    // }
-    // for(int i=0;i<size;i++)
-    // {
-    //     high_slices[i].drop=false;
-    //     high_slices[i].seq_=seq_;
-    // }
 }
 
 void SSTSort::AllocResult(int size,HostAndDeviceMemory* m)
@@ -807,8 +785,8 @@ void SSTSort::AllocResult(int size,HostAndDeviceMemory* m)
     }
     else
     {
-        cudaFreeHost(m->resultSlice);
-        cudaMallocHost((void **)&(m->resultSlice), sizeof(WpSlice) * size);
+        cudaFree(m->resultSlice);
+        cudaMalloc((void **)&(m->resultSlice), sizeof(WpSlice) * size);
         m->result_size=size;
         result_slices=m->resultSlice;
     }
@@ -816,16 +794,14 @@ void SSTSort::AllocResult(int size,HostAndDeviceMemory* m)
 
 standard_context_t context;
 void SSTSort::WpSort() {
+    //printf("test1\n");
     WpSlice last_user_key;
     last_user_key.skv=nullptr;
     uint64_t last_seq = kMaxSequenceNumber;
     //WpSlice* c=nullptr;
     WpSlice* ctest=nullptr;
-    // mergesort(low_slices, low_num, less_t<WpSlice>(), context);
-    // mergesort(high_slices, high_num, less_t<WpSlice>(), context);
     if(low_num!=0&&high_num!=0)
     {
-        //cudaMallocHost((void **)&c, sizeof(WpSlice) * num);
         merge(low_slices, low_num, high_slices, high_num, result_slices, 
             mgpu::less_t<WpSlice>(), context);
         ctest=result_slices;
@@ -851,7 +827,7 @@ void SSTSort::WpSort() {
 
 
     //WpSlice *c_host=ctest;
-
+    //printf("test2\n");
     for(int i=0;i<num;i++)
     {
         bool drop=false;
@@ -873,6 +849,7 @@ void SSTSort::WpSort() {
                 }
             }
         }
+        //printf("test3\n");
         last_user_key.skv=c_host[i].skv;
         uint64_t inum;
         Memcpy((char*)&inum,c_host[i].skv->ikey+c_host[i].skv->key_size-8,sizeof(inum));
@@ -885,30 +862,22 @@ void SSTSort::WpSort() {
             drop = true;
         }
         last_seq = iseq;
-        if(!drop&&d_kvs_)
+        //printf("test3.2\n");
+        if(!drop&&out_)
         {
+            //printf("test3.3\n");
             //Memcpy(&(d_kvs_[out_size_]),c_host[i].skv,sizeof(SST_kv));
-           Memcpy(d_kvs_[out_size_].ikey, c_host[i].skv->ikey, c_host[i].skv->key_size);
-           d_kvs_[out_size_].key_size = c_host[i].skv->key_size;
-           d_kvs_[out_size_].value_size = c_host[i].skv->value_size;
-           d_kvs_[out_size_].value_offset = c_host[i].skv->value_offset;
+           Memcpy(out_[out_size_].ikey, c_host[i].skv->ikey, c_host[i].skv->key_size);
+           //printf("test3.4\n");
+           out_[out_size_].key_size = c_host[i].skv->key_size;
+           out_[out_size_].value_size = c_host[i].skv->value_size;
+           out_[out_size_].value_offset = c_host[i].skv->value_offset;
+           //printf("test3.5\n");
            ++ out_size_;
         }
     }
-    gpu::cudaMemDtH(out_, d_kvs_, sizeof(gpu::SST_kv) * num);
-    // if(low_slices)
-    // {
-    //     cudaFreeHost(low_slices);
-    // }
-    // if(high_slices)
-    // {
-    //     cudaFreeHost(high_slices);
-    // }
-    // if(ctest)
-    // {
-    //     cudaFreeHost(ctest);
-    // }
-    
+    //printf("test4\n");
+    //gpu::cudaMemDtH(out_, d_kvs_, sizeof(gpu::SST_kv) * num); 
 }
         
 

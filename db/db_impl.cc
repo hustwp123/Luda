@@ -1386,13 +1386,13 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     //printf("Sort time:%ld ", duration);
 
     //Encode
-    //gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_, sizeof(gpu::SST_kv) * sort.out_size_);
+    gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_, sizeof(gpu::SST_kv) * sort.out_size_);
 
-    if(!useWP)
-    {
-      //Encode
-      gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_, sizeof(gpu::SST_kv) * sort.out_size_);
-    }
+    // if(!useWP)
+    // {
+    //   //Encode
+    //   gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_, sizeof(gpu::SST_kv) * sort.out_size_);
+    // }
     
 
     int last_keys = sort.out_size_;
