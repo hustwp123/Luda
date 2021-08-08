@@ -39,16 +39,12 @@ public:
     bool operator <(WpSlice& b);
 
 public:
-    // uint32_t offset_;
-    // int value_len_;
-    // char *data_;
-
-    // size_t size_;
+    uint32_t value_offset;
+    int value_size;
+    char *data_;
+    size_t key_size;
 
     SST_kv* skv;
-
-    // bool drop;   
-    // uint64_t seq_;
 };
 
 class Stream {
