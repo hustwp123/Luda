@@ -20,6 +20,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -63,9 +64,29 @@ void* thread_write_file(void* arg) {
   delete pencode;
 }
 
+void thread_Decode(std::vector<gpu::SSTDecode*> decodes) {
+  for (auto& p : decodes) {
+    p->DoDecode();
+  }
+  for (auto& p : decodes) {
+    p->DoGPUDecode_1();
+  }
+  for (auto& p : decodes) {
+    p->DoGPUDecode_2();
+  }
+}
+
+void thread_Encode(gpu::SSTEncode* p) {
+  p->DoEncode_1();
+  p->DoEncode_2();
+  p->DoEncode_3();
+  p->DoEncode_4();
+}
+
 Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
                               const Options& options, TableCache* table_cache,
                               Iterator* iter, FileMetaData* meta) {
+  // uint64_t time1=env_->NowMicros();
   Status s;
   meta->file_size = 0;
   iter->SeekToFirst();
@@ -111,18 +132,26 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
 
     gpu::SSTEncode encode(m_.h_SST[0], kv_cnt, 0);
     encode.SetMemory(&m_, 0);
+    // uint64_t time11=env_->NowMicros();
+    // printf("cpy time=%ld\n",time11-time1);
+
+    // uint64_t time2=env_->NowMicros();
     // encode.DoEncode();
     encode.DoEncode_1();
     encode.DoEncode_2();
     encode.DoEncode_3();
     encode.DoEncode_4();
 
+    // uint64_t time3=env_->NowMicros();
+    // printf("encode time=%ld\n",time3-time2);
+
     // Finish and check for builder errors
     meta->file_size = encode.cur_;
     FILE* f = ::fopen(fname.data(), "wb");
     ::fwrite(encode.h_SST_, 1, encode.cur_, f);
     ::fclose(f);
-
+    // uint64_t time4=env_->NowMicros();
+    // printf("file time=%ld\n",time4-time3);
     // Finish and check for file errors
     if (true) {
       // Verify that the table is usable
@@ -145,6 +174,8 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
   } else {
     env->DeleteFile(fname);
   }
+  // uint64_t time5=env_->NowMicros();
+  // printf("all time=%ld\n",time5-time1);
   return s;
 }
 
@@ -1287,44 +1318,54 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
                               compact->compaction->level());
   gpu::SSTSort sort(compact->smallest_snapshot, m_.h_skv_sorted, &util,
                     m_.d_skv_sorted);
-  bool useWP = (compact->compaction->level() != 0);
-  // bool useWP=false;
+  // bool useWP = (compact->compaction->level() != 0);
+  bool useWP = false;
   int low_kvs = 0;
   int high_kvs = 0;
-
-  for (auto& p : low_decode) {
-    p->DoDecode();
-    low_kvs += p->all_kv_;
-  }
-  for (auto& p : high_decode) {
-    p->DoDecode();
-    high_kvs += p->all_kv_;
-  }
-  IMM_WRITE();
-  if (useWP) {
-    // printf("alloc1 size: %d\n",low_kvs);
-    sort.AllocLow(low_kvs, &m_);
-    // printf("alloc2 size:%d\n",high_kvs);
-    sort.AllocHigh(high_kvs, &m_);
-
-    // printf("end\n");
-    sort.num = low_kvs + high_kvs;
-    sort.low_num = low_kvs;
-    sort.high_num = high_kvs;
-    sort.AllocResult(sort.num, &m_);
-  }
-
-  // printf("low_keys:%d high_keys:%d\n",low_kvs,high_kvs);
   int low_index = 0;
   int high_index = 0;
+
   if (!useWP) {
+    uint64_t time1 = env_->NowMicros();
+    // std::thread t1(thread_Decode,low_decode),t2(thread_Decode,high_decode);
+    // t1.join();
+    // t2.join();
+    for (auto& p : low_decode) {
+      p->DoDecode();
+    }
+    for (auto& p : high_decode) {
+      p->DoDecode();
+    }
     for (auto& p : low_decode) {
       p->DoGPUDecode_1();
     }
     for (auto& p : high_decode) {
       p->DoGPUDecode_1();
     }
+    for (auto& p : low_decode) {
+      p->DoGPUDecode_2();
+    }
+    for (auto& p : high_decode) {
+      p->DoGPUDecode_2();
+    }
+    uint64_t time2 = env_->NowMicros();
+    // printf("decode time=%ld low size=%d high size = %d
+    // \n",time2-time1,low_decode.size(),high_decode.size());
   } else {
+    for (auto& p : low_decode) {
+      p->DoDecode();
+      low_kvs += p->all_kv_;
+    }
+    for (auto& p : high_decode) {
+      p->DoDecode();
+      high_kvs += p->all_kv_;
+    }
+    sort.AllocLow(low_kvs, &m_);
+    sort.AllocHigh(high_kvs, &m_);
+    sort.num = low_kvs + high_kvs;
+    sort.low_num = low_kvs;
+    sort.high_num = high_kvs;
+    sort.AllocResult(sort.num, &m_);
     for (auto& p : low_decode) {
       p->DoGPUDecode_1(sort.low_slices + low_index);
       low_index += p->all_kv_;
@@ -1333,20 +1374,8 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
       p->DoGPUDecode_1(sort.high_slices + high_index);
       high_index += p->all_kv_;
     }
-  }
-
-  IMM_WRITE();
-
-  low_index = 0;
-  high_index = 0;
-  if (!useWP) {
-    for (auto& p : low_decode) {
-      p->DoGPUDecode_2();
-    }
-    for (auto& p : high_decode) {
-      p->DoGPUDecode_2();
-    }
-  } else {
+    low_index = 0;
+    high_index = 0;
     for (auto& p : low_decode) {
       p->DoGPUDecode_2(sort.low_slices, low_index);
       low_index += p->all_kv_;
@@ -1455,6 +1484,17 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     encodes.push_back(p);
   }
   IMM_WRITE();
+  uint64_t time1 = env_->NowMicros();
+  // std::vector<std::thread> threads;
+  // for(int i=0;i<encodes.size();i++)
+  // {
+  //   threads.push_back(std::thread(thread_Encode,encodes[i]));
+  // }
+  // for (auto& current_thread : threads)
+  // {
+  //     current_thread.join();
+  // }
+
   for (auto& p : encodes) {
     p->DoEncode_1();
   }
@@ -1472,6 +1512,9 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   }
   IMM_WRITE();
 
+  uint64_t time2 = env_->NowMicros();
+  // printf("encode time = %ld  size==%d\n",time2-time1,encodes.size());
+
   last_keys = sort.out_size_;
   duration = (env_->NowMicros() - compaction_start);
   compaction_start = env_->NowMicros();
@@ -1480,7 +1523,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   pthread_t tidp[SST_kv_cnts.size()];
   write_file wr[SST_kv_cnts.size()];
 
-  for (int i = 0; i < SST_kv_cnts.size(); ++i) {
+  for (int i = 0; i < SST_kv_cnts.size()-1 ; ++i) {
     // int kv_cnt = keys_per_SST <= last_keys ? keys_per_SST : last_keys;
     int kv_cnt = SST_kv_cnts[i];
     gpu::SSTEncode* pencode = encodes[i];
@@ -1508,12 +1551,11 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     std::string name = TableFileName(dbname_, out.number);
     ////printf("(%s %d) ", name.data(), kv_cnt);
 
-    /*
-FILE *file = ::fopen(name.data(), "wb");
-::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
-    ::fsync(fileno(file));
-::fclose(file);
-    */
+    // FILE *file = ::fopen(name.data(), "wb");
+    // ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
+    //     ::fsync(fileno(file));
+    // ::fclose(file);
+
     wr[i].name = name;
     wr[i].encode = pencode;
     pthread_create(&tidp[i], NULL, thread_write_file, (void*)&wr[i]);
@@ -1522,12 +1564,54 @@ FILE *file = ::fopen(name.data(), "wb");
     // delete pencode;
   }
 
-  for (int i = 0; i < SST_kv_cnts.size(); ++i) {
+  {
+    int i = SST_kv_cnts.size() - 1;
+    int kv_cnt = SST_kv_cnts[i];
+    gpu::SSTEncode* pencode = encodes[i];
+
+    // Write One SST
+    gpu::SST_kv* p = m_.h_skv_sorted;
+    int kv_start = sort.out_size_ - last_keys;
+    Slice smallerst(p[kv_start].ikey, p[kv_start].key_size);
+    Slice largest(p[kv_start + kv_cnt - 1].ikey,
+                  p[kv_start + kv_cnt - 1].key_size);
+
+    mutex_.Lock();
+    uint64_t file_number = versions_->NewFileNumber();
+    pending_outputs_.insert(file_number);
+    CompactionState::Output out;
+    out.number = file_number;
+    out.smallest.DecodeFrom(smallerst);
+    out.largest.DecodeFrom(largest);
+    out.file_size = pencode->cur_;
+    compact->outputs.push_back(out);
+    mutex_.Unlock();
+
+    // Write SST
+    compact->total_bytes += out.file_size;
+    std::string name = TableFileName(dbname_, out.number);
+    ////printf("(%s %d) ", name.data(), kv_cnt);
+
+    FILE* file = ::fopen(name.data(), "wb");
+    ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
+    ::fsync(fileno(file));
+    ::fclose(file);
+
+    // wr[i].name = name;
+    // wr[i].encode = pencode;
+    // pthread_create(&tidp[i], NULL, thread_write_file, (void*)&wr[i]);
+
+    last_keys -= kv_cnt;
+    delete pencode;
+  }
+
+
+  for (int i = 0; i < SST_kv_cnts.size()-1; ++i) {
     pthread_join(tidp[i], NULL);
   }
 
   duration = (env_->NowMicros() - compaction_start);
-  // printf("writefiles time:%ld \n", duration);
+  // printf("writefiles time:%ld size==%d \n", duration,SST_kv_cnts.size());
   duration = (env_->NowMicros() - real_start);
   // printf("all time:%ld\n", duration);
   /////////////// END ///////////////////////
