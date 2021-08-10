@@ -1318,8 +1318,8 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
                               compact->compaction->level());
   gpu::SSTSort sort(compact->smallest_snapshot, m_.h_skv_sorted, &util,
                     m_.d_skv_sorted);
-  // bool useWP = (compact->compaction->level() != 0);
-  bool useWP = false;
+  bool useWP = (compact->compaction->level() != 0);
+  //bool useWP = false;
   int low_kvs = 0;
   int high_kvs = 0;
   int low_index = 0;
