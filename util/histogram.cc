@@ -244,10 +244,10 @@ std::string Histogram::ToString() const {
   snprintf(buf, sizeof(buf), "Count: %.0f  Average: %.4f  StdDev: %.2f\n", num_,
            Average(), StandardDeviation());
   r.append(buf);
-  snprintf(buf, sizeof(buf), "Min: %.4f  Median: %.4f  Max: %.4f\n",
-           (num_ == 0.0 ? 0.0 : min_), Median(), max_);
+  snprintf(buf, sizeof(buf), "Min: %.4f  Median: %.4f  p99: %6.0f  Max: %.4f\n",
+           (num_ == 0.0 ? 0.0 : min_), Median(), Percentile(99.0), max_); //xp
   r.append(buf);
-  r.append("------------------------------------------------------\n");
+  r.append("----------------------------------------------------------\n");
   const double mult = 100.0 / num_;
   double sum = 0;
   for (int b = 0; b < kNumBuckets; b++) {

@@ -91,33 +91,63 @@ public:
   // compactions that produced data for the specified "level".
   struct CompactionStats {
     CompactionStats() : micros(0), bytes_read(0), bytes_written(0),
-      times_compact(0), times_do_compact_work(0), times_memtbl_wait_for_immtbl(0),
-      times_slowdown(0), times_stop(0), times_flush_immtbl(0), sum_micros(0), 
-      sum_bytes_read(0), sum_bytes_written(0)
-     {}
+    times_compact(0), times_do_compact_work(0), times_memtbl_wait_for_immtbl(0),
+    times_slowdown(0), times_stop(0), times_flush_immtbl(0), sum_micros(0), 
+    sum_bytes_read(0), sum_bytes_written(0),
+    times_compact_reason_size(0), times_compact_reason_seek(0),
+    reason_size_bytes_read(0), reason_size_bytes_written(0),
+    reason_seek_bytes_read(0), reason_seek_bytes_written(0)
+    {}
 
     void Add(const CompactionStats& c) {
       this->micros += c.micros;
       this->bytes_read += c.bytes_read;
       this->bytes_written += c.bytes_written;
       this->times_compact++;
-    }
+    } 
+
 
     //xp
-    // only for config::kNumLevels+1
+    // only for config::kNumLevels
     void AddMore(const CompactionStats& c) {
       this->times_do_compact_work++;
-      this->sum_micros += c.micros; //xp !!! ERROR
-      this->sum_bytes_read += c.bytes_read; //xp !!! ERROR
+      this->sum_micros += c.micros; //xp !!! ERROR not accurate
+      this->sum_bytes_read += c.bytes_read; //xp !!! ERROR 
       this->sum_bytes_written += c.bytes_written; //xp !!! ERROR
     }
 
+    void AddReason(const CompactionStats& s, CompactReason reason) {
+      switch(reason) {
+        case kSize:
+          this->times_compact_reason_size++;
+          this->reason_size_bytes_read += s.bytes_read;
+          this->reason_size_bytes_written += s.bytes_written;
+          break;
+        case kSeek:
+          this->times_compact_reason_size++;
+          this->reason_seek_bytes_read += s.bytes_read;
+          this->reason_seek_bytes_written += s.bytes_written;
+          break;
+        case kNull:
+        default:
+          fprintf(stderr, "XXXDBG %s:%d:%s Strange compact reason!\n", 
+                  __FILE__, __LINE__, __func__);
+          break;
+      }
+    }
 
     int64_t micros;
     int64_t bytes_read;
     int64_t bytes_written;
     //xp
     int64_t times_compact; // how many compaction happens in this level
+    int64_t times_compact_reason_size; // how many times compact due to level size in this level
+    int64_t reason_size_bytes_read;
+    int64_t reason_size_bytes_written;
+    int64_t times_compact_reason_seek; // how many times compact due to sst seek miss in this level
+    int64_t reason_seek_bytes_read;
+    int64_t reason_seek_bytes_written;
+
 
     //xp
     // following stats stored in kNumLevels
@@ -129,6 +159,12 @@ public:
     int64_t sum_micros; // total us for compaction
     int64_t sum_bytes_read; // total bytes read for compaction
     int64_t sum_bytes_written; // total bytes write for compaction
+    // int64_t times_compact_reason_size; // how many times compact due to level size
+    int64_t sum_reason_size_bytes_read;
+    int64_t sum_reason_size_bytes_written;
+    // int64_t times_compact_reason_seek; // how many times compact due to sst seek miss
+    int64_t sum_reason_seek_bytes_read;
+    int64_t sum_reason_seek_bytes_written;
   };
 
   Iterator* NewInternalIterator(const ReadOptions&,
@@ -238,7 +274,7 @@ public:
 
   // GPU
   gpu::HostAndDeviceMemory m_;
-  std::atomic<bool> gpu_write_l0_;
+  std::atomic<bool> gpu_write_l0_; //xp TO REMOVE
   Status GPUWriteLevel0(const std::string& dbname, Env* env, const Options& options,
                     TableCache* table_cache, Iterator* iter, FileMetaData* meta);
 };

@@ -1558,6 +1558,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     mutex_.Lock();
     stats_[compact->compaction->level() + 1].Add(stats);
     stats_[config::kNumLevels].AddMore(stats); //xp
+    stats_[compact->compaction->level() + 1].AddReason(stats, compact->compaction->GetReason());
 
     Status status;
     status = InstallCompactionResults(compact);
@@ -1919,6 +1920,12 @@ bool DBImpl::GetProperty(const Slice& property, std::string* value) {
   int64_t sum_bytes_read = 0; // total bytes read for compaction
   int64_t sum_bytes_written = 0; // total bytes write for compactio
   int64_t sum_compact = 0; // total times of compact
+  int64_t sum_times_compact_reason_size = 0;
+  int64_t sum_reason_size_bytes_read = 0;
+  int64_t sum_reason_size_bytes_written = 0;
+  int64_t sum_times_compact_reason_seek = 0;
+  int64_t sum_reason_seek_bytes_read = 0;
+  int64_t sum_reason_seek_bytes_written = 0;
 
   MutexLock l(&mutex_);
   Slice in = property;
@@ -1943,8 +1950,8 @@ bool DBImpl::GetProperty(const Slice& property, std::string* value) {
     char buf[200];
     snprintf(buf, sizeof(buf),
              "                               Compactions\n"
-             "Level  Files Size(MB) Time(sec) Read(MB) Write(MB) Happens\n"
-             "----------------------------------------------------------\n");
+             "Level  Files Size(MB) Time(sec) Read(MB) Write(MB)  Happens\n"
+             "-----------------------------------------------------------\n");
     value->append(buf);
     for (int level = 0; level < config::kNumLevels; level++) {
       int files = versions_->NumLevelFiles(level);
@@ -1960,10 +1967,28 @@ bool DBImpl::GetProperty(const Slice& property, std::string* value) {
         sum_bytes_read += stats_[level].bytes_read;
         sum_bytes_written += stats_[level].bytes_written;
         sum_compact += stats_[level+1].times_compact;
+        sum_times_compact_reason_size += stats_[level+1].times_compact_reason_size;
+        sum_times_compact_reason_seek += stats_[level+1].times_compact_reason_seek;
+        sum_reason_size_bytes_read += stats_[level].reason_size_bytes_read;
+        sum_reason_size_bytes_written += stats_[level].reason_size_bytes_written;
+        sum_reason_seek_bytes_read += stats_[level].reason_seek_bytes_read;
+        sum_reason_seek_bytes_written += stats_[level].reason_seek_bytes_written;
       }
     }
     //xp
-                              //  3      405     1560        49     7340      6746
+    snprintf(buf, sizeof(buf),
+             "-----------------------------------------------------------\n");
+    value->append(buf);
+    snprintf(buf, sizeof(buf), "Size Compact                   %9.0f %9.0f %8ld\n",
+                 sum_reason_size_bytes_read / 1048576.0,
+                 sum_reason_size_bytes_written / 1048576.0,
+                 sum_times_compact_reason_size);
+    value->append(buf);
+    snprintf(buf, sizeof(buf), "Seek Compact                   %9.0f %9.0f %8ld\n",
+                 sum_reason_seek_bytes_read / 1048576.0,
+                 sum_reason_seek_bytes_written / 1048576.0,
+                 sum_times_compact_reason_seek);
+    value->append(buf);
     snprintf(buf, sizeof(buf), "SUM                   %9.0f %8.0f %9.0f %8ld\n",
                  sum_micros / 1e6,
                  sum_bytes_read / 1048576.0,
@@ -1973,16 +1998,16 @@ bool DBImpl::GetProperty(const Slice& property, std::string* value) {
     // snprintf(buf, sizeof(buf), "   Compact. times: %8ld\n",
     //              stats_[config::kNumLevels].times_do_compact_work);
     // value->append(buf);
-    snprintf(buf, sizeof(buf), "Flush Imm_. times: %8ld\n",
+    snprintf(buf, sizeof(buf), "     Flush Imm_. #:    %8ld\n",
                  stats_[config::kNumLevels].times_flush_immtbl);
     value->append(buf);
-    snprintf(buf, sizeof(buf), "Memtbl full times: %8ld\n",
+    snprintf(buf, sizeof(buf), "     Memtbl full #:    %8ld\n",
                  stats_[config::kNumLevels].times_memtbl_wait_for_immtbl);
     value->append(buf);
-    snprintf(buf, sizeof(buf), "   Slowdown times: %8ld\n",
+    snprintf(buf, sizeof(buf), "Compact slowdown #:    %8ld\n",
                  stats_[config::kNumLevels].times_slowdown);
     value->append(buf);
-    snprintf(buf, sizeof(buf), "       Stop times: %8ld\n",
+    snprintf(buf, sizeof(buf), "    Compact stop #:    %8ld\n",
                  stats_[config::kNumLevels].times_stop);
     value->append(buf);
     return true;

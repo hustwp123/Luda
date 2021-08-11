@@ -362,6 +362,10 @@ class Compaction {
   // is successful.
   void ReleaseInputs();
 
+  //xp
+  CompactReason GetReason();
+
+
  //private:
   friend class Version;
   friend class VersionSet;
@@ -386,6 +390,9 @@ class Compaction {
   bool seen_key_;             // Some output key has been seen
   int64_t overlapped_bytes_;  // Bytes of overlap between current output
                               // and grandparent files
+
+  //xp
+  CompactReason reason;
 
   // State for implementing IsBaseLevelForKey
 

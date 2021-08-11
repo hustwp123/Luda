@@ -44,6 +44,8 @@ static const int kReadBytesPeriod = 1048576;
 
 }  // namespace config
 
+enum CompactReason {kNull = 0x0, kSize = 0x1, kSeek = 0x2}; //xp
+
 class InternalKey;
 
 // Value types encoded as the last component of internal keys.
