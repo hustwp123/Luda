@@ -8,6 +8,9 @@
 #include <string.h>
 #include <assert.h>
 #include <vector>
+#include <unordered_map>
+#include <map>
+#include <queue>
 
 #define K_SHARED_KEYS (4)
 #define CUDA_MAX_COMPACTION_FILES (40)
@@ -215,6 +218,7 @@ struct SST_kv {          // SST sorted KV pair
     uint32_t key_size;       // Key的大小
 
     uint32_t value_offset;   // SST中value的偏移，这是包含前面的Varint size
+    //uint32_t value_offset_tmp;
     uint32_t value_size;     // Value的大小(包含前面的Varint size)
 };
 
@@ -240,6 +244,28 @@ public:
      HostAndDeviceMemory();
      ~HostAndDeviceMemory();
 
+     SST_kv* getL0skv()
+     {
+         SST_kv *L0_skv;
+         if(q.empty())
+         {
+             L0_skv=(SST_kv*)malloc(sizeof(SST_kv) * CUDA_MAX_KEY_PER_SST);
+             return L0_skv;
+         }
+         L0_skv=q.front();
+         q.pop();
+         return L0_skv;
+     }
+     void pushL0skv(SST_kv* L0_skv)
+     {
+         q.push(L0_skv);
+     }
+
+    std::unordered_map<std::string,SST_kv  *> l0_hkv;
+    std::unordered_map<std::string,int> l0_knum;
+    std::queue<SST_kv*> q;
+    
+
     // vector 中每个成员只代表一个SST中decode、endcode等等的数据
     std::vector<char *> h_SST;    // 保存读取上来的SST，也保存Decode生成的新SST
     std::vector<char *> d_SST;
@@ -250,6 +276,8 @@ public:
 
     std::vector<SST_kv *> h_skv;
     std::vector<SST_kv *> d_skv;
+
+    SST_kv *L0_d_skv_sorted;
 
     // Decode后Sorted排序好的
     SST_kv *h_skv_sorted;
@@ -279,9 +307,10 @@ public:
 class SSTDecode {
 public:
     
-    SSTDecode(const char* filename, int filesize, char *SST) :
+    SSTDecode(const char* filename, int filesize, char *SST,std::string fname) :
            all_kv_(0), shared_cnt_(0), h_SST_(SST), file_size_(filesize) {
         //TODO: open file and read it to h_SST_
+        inMem=false;
         FILE* file = ::fopen(filename, "rb");
         assert(file);
         size_t n = ::fread(h_SST_, sizeof(char), file_size_, file);
@@ -310,10 +339,35 @@ public:
      // Async Decode
      void DoGPUDecode_1(WpSlice* slices=nullptr,int index=0);
      void DoGPUDecode_2(WpSlice* slices=nullptr,int index=0);
+     void Copy();
 
     int all_kv_;
 
 //private:
+    
+    bool FindInMem(std::string fname,HostAndDeviceMemory *m)
+    {
+        auto it=m->l0_hkv.find(fname);
+        auto it2=m->l0_knum.find(fname);
+        if(it==m->l0_hkv.end())
+        {
+            return false;
+        }
+        assert(it2!=m->l0_knum.end());
+        SST_kv* skv=it->second;
+        int num=it2->second;
+        memcpy(h_skv_,skv,sizeof(SST_kv)*num);
+        all_kv_=num;
+        inMem=true;
+        // free(skv);
+        m->pushL0skv(skv);
+        m->l0_hkv.erase(it);
+        m->l0_knum.erase(it2);
+        return true;
+    }
+
+    bool inMem;
+
     char* h_SST_;
     char* d_SST_;
 
@@ -476,6 +530,8 @@ public:
 
         h_fmeta_ = m->h_fmeta[SST_idx_];
         d_fmeta_ = m->d_fmeta[SST_idx_];
+
+        l0_d_skv_=m->L0_d_skv_sorted;
     }
 
     void ComputeDataBlockOffset(int sc = kDataSharedCnt);     // 每个DataBlock 默认有多少个共享前缀块
@@ -485,8 +541,8 @@ public:
     void DoEncode();
 
     // AsyncEncode
-    void DoEncode_1();
-    void DoEncode_2();
+    void DoEncode_1(bool f=false);
+    void DoEncode_2(bool f=false);
     void DoEncode_3();
     void DoEncode_4();
 
@@ -496,6 +552,8 @@ public:
 
     char **d_SST_ptr;
     int SST_idx_;
+
+    SST_kv *l0_d_skv_;
 
     SST_kv *h_skv_;
     SST_kv *d_skv_;               // Full Key-Value Not the shared-KV

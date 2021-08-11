@@ -29,7 +29,7 @@ void GPUDecodeKernel(char **SST, int SSTIdx, GDI *gdi, int gdi_cnt, SST_kv *skv,
 // kv_start = (x * dim_y + y) * kSharedKeys
 // SharedBlock kv_count = distance[kv_start, min(kv_start + kSharedKeys, kv_end)]
 __global__
-void GPUEncodeSharedKernel(SST_kv *skv, SST_kv *skv_new, int base, int skv_cnt, uint32_t *shared_size);  // default that Per-Shared have 16 KVs
+void GPUEncodeSharedKernel(SST_kv *skv, SST_kv *skv_new, int base, int skv_cnt, uint32_t *shared_size,SST_kv *l0_d_skv_=nullptr);  // default that Per-Shared have 16 KVs
 
 // Copy the DataBlock and the SharedBlock
 // <<<x, y>>>
@@ -39,7 +39,7 @@ void GPUEncodeSharedKernel(SST_kv *skv, SST_kv *skv_new, int base, int skv_cnt, 
 // DataBlock restarts[] Write
 __global__
 void GPUEncodeCopyShared(char **SST, char *SST_new, SST_kv *skv, int base_idx, int skv_cnt,
-        uint32_t *shared_offset, int shared_cnt, int base = 0);
+        uint32_t *shared_offset, int shared_cnt, int base = 0,SST_kv* d_skv=nullptr,SST_kv *l0_d_skv_=nullptr);
 
 // <<<x, y>>>
 // idx = x * dim_y + y

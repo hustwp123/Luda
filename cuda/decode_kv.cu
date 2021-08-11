@@ -94,12 +94,22 @@ HostAndDeviceMemory::HostAndDeviceMemory() {
         d_fmeta.push_back(pd_fm);
     }
 
+    SST_kv *L0_skv;
+    for(int i=0;i<15;i++)
+    {
+        L0_skv=(SST_kv*)malloc(sizeof(SST_kv) * CUDA_MAX_KEY_PER_SST);
+        q.push(L0_skv);
+    }
+
     low_size=50000;
     high_size=150000;
     result_size=200000;
     cudaMallocHost((void **)&lowSlices, sizeof(WpSlice) * low_size);
     cudaMallocHost((void **)&highSlices, sizeof(WpSlice) * high_size);
     cudaMalloc((void **)&resultSlice, sizeof(WpSlice) * result_size);
+
+    cudaMalloc((void **)&L0_d_skv_sorted, sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
+
 
     // 排序好的空间申请
     h_skv_sorted = (SST_kv *)malloc(sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
@@ -140,8 +150,22 @@ HostAndDeviceMemory::~HostAndDeviceMemory() {
     cudaFreeHost(highSlices);
     cudaFree(resultSlice);
 
+    cudaFree(L0_d_skv_sorted);
+
     cudaFree(d_skv_sorted);
     cudaFree(d_skv_sorted_shared);
+
+    for(auto it=l0_hkv.begin();it!=l0_hkv.end();it++)
+    {
+        free(it->second);
+    }
+    SST_kv *temp;
+    while(!q.empty())
+    {
+        temp=q.front();
+        q.pop();
+        free(temp);
+    }
 }
 
 //////////// Decodde /////////////////////////////
@@ -220,6 +244,21 @@ void SSTDecode::DoGPUDecode() {
 
     // cudaMemcpy  h_skv_         <=== GPU
     cudaMemcpy(h_skv_, d_skv_, sizeof(SST_kv) * all_kv_, cudaMemcpyDeviceToHost);
+}
+
+__host__
+void SSTDecode::Copy()
+{
+    cudaStream_t s = (cudaStream_t) s_.data();
+    for(int i=0;i<all_kv_;i++)
+    {
+        SST_kv *pskv=&h_skv_[i];
+        //pskv->value_offset=pskv->value_offset_tmp;
+        EncodeValueOffset(&pskv->value_offset, SST_idx_);
+    }
+    cudaMemcpyAsync(d_SST_, h_SST_, file_size_, cudaMemcpyHostToDevice, s);
+    cudaMemcpyAsync(d_skv_, h_skv_, sizeof(SST_kv) * all_kv_, cudaMemcpyHostToDevice, s);
+    s_.Sync();
 }
 
 __host__
@@ -410,7 +449,7 @@ void GPUDecodeKernel(char **SST, int SSTIdx, GDI *gdi, int gdi_cnt, SST_kv *skv,
  * kv_end = min(kv_start + 16, kv_max_cnt);
  */
 __global__
-void GPUEncodeSharedKernel(SST_kv *skv, SST_kv *skv_new, int base, int skv_cnt, uint32_t *shared_size) {
+void GPUEncodeSharedKernel(SST_kv *skv, SST_kv *skv_new, int base, int skv_cnt, uint32_t *shared_size,SST_kv *l0_d_skv_) {
     int kv_start = base + (::blockIdx.x * ::blockDim.x + ::threadIdx.x) * kSharedKeys;
     int kv_count = kSharedKeys <= skv_cnt + base - kv_start ? kSharedKeys : skv_cnt + base - kv_start;
 
@@ -432,6 +471,13 @@ void GPUEncodeSharedKernel(SST_kv *skv, SST_kv *skv_new, int base, int skv_cnt, 
     pf->value_size = skv[kv_start].value_size;
 
     total_size += pf->key_size + pf->value_size ;
+
+    if(l0_d_skv_)
+    {
+        Memcpy(l0_d_skv_[kv_start].ikey,skv[kv_start].ikey,skv[kv_start].key_size);
+        l0_d_skv_[kv_start].key_size=skv[kv_start].key_size;
+        l0_d_skv_[kv_start].value_size=skv[kv_start].value_size;
+    }
 
     // 2. Encode the last keys.
     // Odd idx use key_buf[0] for LAST, and use key_buf[1] for NOW
@@ -459,6 +505,13 @@ void GPUEncodeSharedKernel(SST_kv *skv, SST_kv *skv_new, int base, int skv_cnt, 
         pskv_new->key_size = buf.size_ + non_shared;
         pskv_new->value_size = pskv->value_size;
         pskv_new->value_offset = pskv->value_offset;
+
+        if(l0_d_skv_)
+        {
+            Memcpy(l0_d_skv_[kv_start+i].ikey,skv[kv_start+i].ikey,skv[kv_start+i].key_size);
+            l0_d_skv_[kv_start+i].key_size=skv[kv_start+i].key_size;
+            l0_d_skv_[kv_start+i].value_size=skv[kv_start+i].value_size;
+        }
 
         total_size += pskv_new->key_size + pskv_new->value_size;
 
@@ -526,7 +579,7 @@ void GPUEncodeCRC32_base(char *base, size_t n) {
  */
 __global__
 void GPUEncodeCopyShared(char **SST, char *SST_new, SST_kv *skv, int base_idx,
-        int skv_cnt, uint32_t *shared_offset, int shared_cnt, int __base) {
+        int skv_cnt, uint32_t *shared_offset, int shared_cnt, int __base,SST_kv *d_skv,SST_kv *l0_d_skv) {
     int shared_idx = blockIdx.x * blockDim.y + threadIdx.y;
 
     int kv_start = base_idx + shared_idx * kSharedKeys;
@@ -553,12 +606,58 @@ void GPUEncodeCopyShared(char **SST, char *SST_new, SST_kv *skv, int base_idx,
         char *value = SST[idx] + pskv->value_offset;
         //Memcpy(base + cur, value, pskv->value_size);
         __copy_mm(base + cur, value, pskv->value_size);
+        if(l0_d_skv)
+        {
+            l0_d_skv[kv_start + i].value_offset=base + cur-SST_new;
+        }
+        
+
 		if (value[0] == 0) {
 			printf(" cur:%d %d\n", pskv->value_offset, idx);
 			assert(0);
 		}
         cur += pskv->value_size;
     }
+    // wp
+    // if (l0_d_skv) {
+    //   const char* p = base;
+    //   const char* limit = base + cur;
+    //   SST_kv* pskv = &l0_d_skv[kv_start];
+    //   uint32_t shared, non_shared, value_length;
+    //   // 1. Decode first KeyValue
+    //   p = DecodeEntry(p, limit, &shared, &non_shared, &value_length);
+    //   assert(p && !shared);
+    //   Memcpy(pskv->ikey, p, non_shared);
+    //   pskv->key_size = shared + non_shared;
+    //   int idx;
+    //   //DecodeValueOffset(&(skv[kv_start].value_offset), &idx);
+    //   pskv->value_offset = p+non_shared-SST_new;
+    //   // EncodeValueOffset(&pskv->value_offset, SSTIdx);
+    //   pskv->value_size = value_length;
+    //   p += non_shared + value_length;
+
+    //   // 2. Decode the last keys
+    //   uint32_t kv_idx = 1;
+    //   while (kv_idx < kv_cnt) {
+    //     pskv = &l0_d_skv[kv_start + kv_idx];
+
+    //     p = DecodeEntry(p, limit, &shared, &non_shared, &value_length);
+    //     assert(p);
+
+    //     Memcpy(pskv->ikey, (pskv - 1)->ikey,
+    //            shared);  // copy the last Shared-Key
+    //     Memcpy(pskv->ikey + shared, p, non_shared);
+    //     pskv->key_size = shared + non_shared;
+    //     //DecodeValueOffset(&(skv[kv_start+ kv_idx].value_offset), &idx);
+    //     pskv->value_offset = p+non_shared-SST_new;
+    //     // EncodeValueOffset(&pskv->value_offset, SSTIdx);
+    //     pskv->value_size = value_length;
+
+    //     p = p + non_shared + value_length;
+    //     ++kv_idx;
+    //   }
+    //   // wp end
+    // }
 
     // 每个DataBlock中的最后一个SharedBlock做最后的Reastart[]落盘操作
     if ( (shared_idx + 1) % kDataSharedCnt == 0 || 
@@ -1229,12 +1328,15 @@ __host__ void SSTEncode::DoEncode() {
     cudaStreamDestroy(s2);
 }
 
-__host__ void SSTEncode::DoEncode_1() {
+__host__ void SSTEncode::DoEncode_1(bool f) {
     cudaStream_t s1 = (cudaStream_t) s1_.data();
-    GPUEncodeSharedKernel<<<M, N, 0, s1>>>(d_skv_, d_skv_new_, base_, kv_count_, d_shared_size_);
+    if(f)
+        GPUEncodeSharedKernel<<<M, N, 0, s1>>>(d_skv_, d_skv_new_, base_, kv_count_, d_shared_size_,l0_d_skv_);
+    else
+        GPUEncodeSharedKernel<<<M, N, 0, s1>>>(d_skv_, d_skv_new_, base_, kv_count_, d_shared_size_);
 }
 
-__host__ void SSTEncode::DoEncode_2() {
+__host__ void SSTEncode::DoEncode_2(bool f) {
     cudaStream_t s1 = (cudaStream_t) s1_.data();
     cudaStream_t s2 = (cudaStream_t) s2_.data();
 
@@ -1246,8 +1348,16 @@ __host__ void SSTEncode::DoEncode_2() {
 
     //dim3 block(32, 16), grid(512, 1);
     dim3 block(32, 16), grid(M, 1);
-    GPUEncodeCopyShared<<<grid, block, 0, s1>>>(d_SST_ptr, d_SST_new_, d_skv_new_, base_, 
-            kv_count_, d_shared_offset_, shared_count_);
+    if(f)
+    {
+        GPUEncodeCopyShared<<<grid, block, 0, s1>>>(d_SST_ptr, d_SST_new_, d_skv_new_, base_, 
+            kv_count_, d_shared_offset_, shared_count_,0,d_skv_,l0_d_skv_);
+    }
+    else{
+        GPUEncodeCopyShared<<<grid, block, 0, s1>>>(d_SST_ptr, d_SST_new_, d_skv_new_, base_, 
+            kv_count_, d_shared_offset_, shared_count_,0,d_skv_);
+    }
+    
 
     //dim3 cblock(4, 8), cgrid(512, 1);
     dim3 cblock(4, 8), cgrid(M, 1);

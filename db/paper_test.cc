@@ -306,7 +306,7 @@ void test_full_CPU_GPU(const char *f, uint64_t size) {
 
     // 1. Decode
     START(ts);
-    leveldb::gpu::SSTDecode SST(filename, filesize, m.h_SST[0]);
+    leveldb::gpu::SSTDecode SST(filename, filesize, m.h_SST[0],std::string(f));
     SST.SetMemory(0, &m);
     SST.DoDecode();
     SST.DoGPUDecode();
@@ -455,7 +455,6 @@ int main() {
         f = "./000019.ldb";
         size = 3892367;
     }
-
     //create_db(true);
     test_full_CPU_GPU(f, size);
     //test_SST_correct(f, size);

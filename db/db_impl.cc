@@ -86,6 +86,7 @@ void thread_Encode(gpu::SSTEncode* p) {
 Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
                               const Options& options, TableCache* table_cache,
                               Iterator* iter, FileMetaData* meta) {
+  //printf("GPUWriteLevel0\n");
   // uint64_t time1=env_->NowMicros();
   Status s;
   meta->file_size = 0;
@@ -126,6 +127,8 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
     // Copy Key Value to GPU
     ////printf("l0 %s %s cnt:%d\n", fname.data(),
     /// meta->largest.DebugString().data(), kv_cnt);
+      
+
     gpu::cudaMemHtD(m_.d_SST[0], m_.h_SST[0], dst_off);
     gpu::cudaMemHtD(m_.d_skv_sorted, m_.h_skv_sorted,
                     sizeof(gpu::SST_kv) * kv_cnt);
@@ -137,10 +140,21 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
 
     // uint64_t time2=env_->NowMicros();
     // encode.DoEncode();
-    encode.DoEncode_1();
-    encode.DoEncode_2();
+    encode.DoEncode_1(true);
+    encode.DoEncode_2(true);
     encode.DoEncode_3();
     encode.DoEncode_4();
+
+
+    // /gpu::SST_kv* temp=(gpu::SST_kv*)malloc(sizeof(gpu::SST_kv) * kv_cnt);
+
+    gpu::SST_kv* temp=m_.getL0skv();
+    gpu::cudaMemDtH(temp,encode.l0_d_skv_,sizeof(gpu::SST_kv) * kv_cnt);
+    //gpu::cudaMemDtH(temp,encode.d_skv_,sizeof(gpu::SST_kv) * kv_cnt);
+      //memcpy(temp,m_.h_skv_sorted,sizeof(gpu::SST_kv) * kv_cnt);
+      m_.l0_hkv[fname]=temp;
+      m_.l0_knum[fname]=kv_cnt;
+    //printf("kv_cnt==%d\n",kv_cnt);
 
     // uint64_t time3=env_->NowMicros();
     // printf("encode time=%ld\n",time3-time2);
@@ -150,6 +164,7 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
     FILE* f = ::fopen(fname.data(), "wb");
     ::fwrite(encode.h_SST_, 1, encode.cur_, f);
     ::fclose(f);
+
     // uint64_t time4=env_->NowMicros();
     // printf("file time=%ld\n",time4-time3);
     // Finish and check for file errors
@@ -1220,6 +1235,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
  * The final VERSION of GPU
  */
 Status DBImpl::DoCompactionWork(CompactionState* compact) {
+  
   const uint64_t start_micros = env_->NowMicros();
   int64_t imm_micros = 0;  // Micros spent doing imm_ compactions
 
@@ -1286,15 +1302,28 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 
   uint64_t compaction_start = env_->NowMicros();
   uint64_t real_start = env_->NowMicros();
+
+  bool useWP = (compact->compaction->level() != 0);
+  //bool useWP = false;
+
   // Decode SST
   std::vector<gpu::SSTDecode*> low_decode, high_decode;
   int sst_idx = 0;
   for (auto& low : compact->compaction->inputs_[0]) {
     std::string filename = TableFileName(dbname_, low->number);
     ////printf("%s ", filename.data());
-    gpu::SSTDecode* p =
-        new gpu::SSTDecode(filename.data(), low->file_size, m_.h_SST[sst_idx]);
+    gpu::SSTDecode* p;
+      p =new gpu::SSTDecode(filename.data(), low->file_size, m_.h_SST[sst_idx],filename);
     p->SetMemory(sst_idx++, &m_);
+    if(!useWP)
+    {
+      p->FindInMem(filename,&m_);
+      // bool f=p->FindInMem(filename,&m_);
+      // if(f)
+      // {
+      //   printf("get in Mem num==%d\n",p->all_kv_);
+      // }
+    }
     low_decode.push_back(p);
   }
 
@@ -1303,7 +1332,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     std::string filename = TableFileName(dbname_, high->number);
     ////printf("%s ", filename.data());
     gpu::SSTDecode* p =
-        new gpu::SSTDecode(filename.data(), high->file_size, m_.h_SST[sst_idx]);
+        new gpu::SSTDecode(filename.data(), high->file_size, m_.h_SST[sst_idx],filename);
     p->SetMemory(sst_idx++, &m_);
     high_decode.push_back(p);
   }
@@ -1318,8 +1347,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
                               compact->compaction->level());
   gpu::SSTSort sort(compact->smallest_snapshot, m_.h_skv_sorted, &util,
                     m_.d_skv_sorted);
-  bool useWP = (compact->compaction->level() != 0);
-  //bool useWP = false;
+  
   int low_kvs = 0;
   int high_kvs = 0;
   int low_index = 0;
@@ -1331,19 +1359,24 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     // t1.join();
     // t2.join();
     for (auto& p : low_decode) {
-      p->DoDecode();
+      if(!p->inMem)
+        p->DoDecode();
+      else
+        p->Copy();
     }
     for (auto& p : high_decode) {
       p->DoDecode();
     }
     for (auto& p : low_decode) {
-      p->DoGPUDecode_1();
+      if(!p->inMem)
+        p->DoGPUDecode_1();
     }
     for (auto& p : high_decode) {
       p->DoGPUDecode_1();
     }
     for (auto& p : low_decode) {
-      p->DoGPUDecode_2();
+      if(!p->inMem)
+        p->DoGPUDecode_2();
     }
     for (auto& p : high_decode) {
       p->DoGPUDecode_2();
@@ -1431,12 +1464,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_,
                   sizeof(gpu::SST_kv) * sort.out_size_);
 
-  // if(!useWP)
-  // {
-  //   //Encode
-  //   gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_, sizeof(gpu::SST_kv) *
-  //   sort.out_size_);
-  // }
 
   int last_keys = sort.out_size_;
   int keys_per_SST = gpu::kSharedKeys * gpu::kSharedPerSST;
