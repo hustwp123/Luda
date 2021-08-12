@@ -86,7 +86,6 @@ void thread_Encode(gpu::SSTEncode* p) {
 Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
                               const Options& options, TableCache* table_cache,
                               Iterator* iter, FileMetaData* meta) {
-  //printf("GPUWriteLevel0\n");
   // uint64_t time1=env_->NowMicros();
   Status s;
   meta->file_size = 0;
@@ -135,10 +134,6 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
 
     gpu::SSTEncode encode(m_.h_SST[0], kv_cnt, 0);
     encode.SetMemory(&m_, 0);
-    // uint64_t time11=env_->NowMicros();
-    // printf("cpy time=%ld\n",time11-time1);
-
-    // uint64_t time2=env_->NowMicros();
     // encode.DoEncode();
     encode.DoEncode_1(true);
     encode.DoEncode_2(true);
@@ -146,7 +141,6 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
     encode.DoEncode_4();
 
 
-    // /gpu::SST_kv* temp=(gpu::SST_kv*)malloc(sizeof(gpu::SST_kv) * kv_cnt);
 
     gpu::SST_kv* temp=m_.getL0skv();
     gpu::cudaMemDtH(temp,encode.l0_d_skv_,sizeof(gpu::SST_kv) * kv_cnt);
@@ -156,8 +150,6 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
       m_.l0_knum[fname]=kv_cnt;
     //printf("kv_cnt==%d\n",kv_cnt);
 
-    // uint64_t time3=env_->NowMicros();
-    // printf("encode time=%ld\n",time3-time2);
 
     // Finish and check for builder errors
     meta->file_size = encode.cur_;
@@ -165,8 +157,6 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
     ::fwrite(encode.h_SST_, 1, encode.cur_, f);
     ::fclose(f);
 
-    // uint64_t time4=env_->NowMicros();
-    // printf("file time=%ld\n",time4-time3);
     // Finish and check for file errors
     if (true) {
       // Verify that the table is usable
@@ -189,8 +179,6 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
   } else {
     env->DeleteFile(fname);
   }
-  // uint64_t time5=env_->NowMicros();
-  // printf("all time=%ld\n",time5-time1);
   return s;
 }
 
@@ -1311,7 +1299,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   int sst_idx = 0;
   for (auto& low : compact->compaction->inputs_[0]) {
     std::string filename = TableFileName(dbname_, low->number);
-    ////printf("%s ", filename.data());
     gpu::SSTDecode* p;
       p =new gpu::SSTDecode(filename.data(), low->file_size, m_.h_SST[sst_idx],filename);
     p->SetMemory(sst_idx++, &m_);
@@ -1354,10 +1341,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   int high_index = 0;
 
   if (!useWP) {
-    uint64_t time1 = env_->NowMicros();
-    // std::thread t1(thread_Decode,low_decode),t2(thread_Decode,high_decode);
-    // t1.join();
-    // t2.join();
     for (auto& p : low_decode) {
       if(!p->inMem)
         p->DoDecode();
@@ -1381,9 +1364,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     for (auto& p : high_decode) {
       p->DoGPUDecode_2();
     }
-    uint64_t time2 = env_->NowMicros();
-    // printf("decode time=%ld low size=%d high size = %d
-    // \n",time2-time1,low_decode.size(),high_decode.size());
   } else {
     for (auto& p : low_decode) {
       p->DoDecode();
@@ -1511,7 +1491,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     encodes.push_back(p);
   }
   IMM_WRITE();
-  uint64_t time1 = env_->NowMicros();
   // std::vector<std::thread> threads;
   // for(int i=0;i<encodes.size();i++)
   // {
@@ -1538,9 +1517,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     p->DoEncode_4();
   }
   IMM_WRITE();
-
-  uint64_t time2 = env_->NowMicros();
-  // printf("encode time = %ld  size==%d\n",time2-time1,encodes.size());
 
   last_keys = sort.out_size_;
   duration = (env_->NowMicros() - compaction_start);

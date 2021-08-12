@@ -95,7 +95,7 @@ HostAndDeviceMemory::HostAndDeviceMemory() {
     }
 
     SST_kv *L0_skv;
-    for(int i=0;i<15;i++)
+    for(int i=0;i<10;i++)
     {
         L0_skv=(SST_kv*)malloc(sizeof(SST_kv) * CUDA_MAX_KEY_PER_SST);
         q.push(L0_skv);
