@@ -39,6 +39,8 @@ public:
     SST_kv *d_skv_sorted;
     SST_kv *d_skv_sorted_shared;
 
+    SST_kv *L0_d_skv_sorted;
+
     // Device 端访问SST的数组
     char **d_SST_ptr;
 
