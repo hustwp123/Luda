@@ -47,8 +47,10 @@ bool Footer::DecodeFrom(Slice *input) {
         return false;
     }
 
-    assert(metaindex_handle_.DecodeFrom(input));
-    assert(index_handle_.DecodeFrom(input));
+    metaindex_handle_.DecodeFrom(input);
+    index_handle_.DecodeFrom(input);
+    // assert();
+    // assert();
 
     return true;
 }
