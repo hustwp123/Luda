@@ -110,11 +110,14 @@ HostAndDeviceMemory::HostAndDeviceMemory() {
 
     cudaMalloc((void **)&L0_d_skv_sorted, sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
 
+    cudaMalloc((void **)&L0_d_skv_sorted_2, sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
 
     // 排序好的空间申请
+    L0_h_skv_sorted = (SST_kv *)malloc(sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
     h_skv_sorted = (SST_kv *)malloc(sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
     cudaMalloc((void **)&d_skv_sorted, sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
     cudaMalloc((void **)&d_skv_sorted_shared, sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
+    cudaMalloc((void **)&L0_d_skv_sorted_shared, sizeof(SST_kv) * CUDA_MAX_KEYS_COMPACTION);
     assert(h_skv_sorted && d_skv_sorted && d_skv_sorted_shared);
 
 
@@ -145,15 +148,18 @@ HostAndDeviceMemory::~HostAndDeviceMemory() {
     }
 
     free(h_skv_sorted);
+    free(L0_h_skv_sorted);
 
     cudaFreeHost(lowSlices);
     cudaFreeHost(highSlices);
     cudaFree(resultSlice);
 
     cudaFree(L0_d_skv_sorted);
+    cudaFree(L0_d_skv_sorted_2);
 
     cudaFree(d_skv_sorted);
     cudaFree(d_skv_sorted_shared);
+    cudaFree(L0_d_skv_sorted_shared);
 
     for(auto it=l0_hkv.begin();it!=l0_hkv.end();it++)
     {
@@ -807,25 +813,6 @@ Slice SSTSort::FindL0Smallest() {
 
 MGPU_HOST_DEVICE bool WpSlice::operator <(WpSlice& b)
 {
-    // uint64_t anum,bnum;
-    // Memcpy((char*)&anum,skv->ikey+skv->key_size-8,sizeof(anum));
-    // Memcpy((char*)&bnum,b.skv->ikey+b.skv->key_size-8,sizeof(bnum));
-    // uint64_t aseq=anum>>8;
-    // uint8_t atype=bnum&0xff;
-    // uint64_t bseq=bnum>>8;
-    // uint8_t btype=bnum&0xff;
-    // if(atype==kTypeDeletion&&aseq<=seq_)
-    // {
-    //     drop=true;
-    // }
-    // if(btype==kTypeDeletion&&bseq<=seq_)
-    // {
-    //     b.drop=true;
-    // }
-    // if(drop||b.drop)
-    // {
-    //     return true;
-    // }
     size_t min_len=(key_size < b.key_size) ? key_size : b.key_size;
     min_len-=8;
     for(int i=0;i<min_len;i++)
@@ -939,17 +926,6 @@ void SSTSort::WpSort() {
     //printf("test2\n");
     for(int i=0;i<num;i++)
     {
-
-        // if(c_host[i].skv->key_size!=c_host[i].key_size||c_host[i].skv->value_offset!=c_host[i].value_offset||
-        // c_host[i].value_size!=c_host[i].skv->value_size)
-        // {
-        //     printf("errrrrrrrrrrrrrrrrrrrrr\n");
-        //     printf("key size %d    %d \n",c_host[i].skv->key_size,c_host[i].key_size);
-        //     printf("value_offset %d    %d \n",c_host[i].skv->value_offset,c_host[i].value_offset);
-        //     printf("value_size %d    %d \n",c_host[i].skv->value_size,c_host[i].value_size);
-        //     exit(-1);
-        // }
-
         bool drop=false;
         if(last_user_key.data_)
         {

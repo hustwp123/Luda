@@ -96,11 +96,14 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
                                     // one time
   gpu_write_l0_.store(true, std::memory_order_release);
 
+   int sst_id=CUDA_MAX_COMPACTION_FILES-1;
+  //int ssd_id=0;
+
   std::string fname = TableFileName(dbname, meta->number);
   if (iter->Valid()) {
     int kv_cnt = 0;
-    gpu::SST_kv* pskv = m_.h_skv_sorted;
-    char* dst = m_.h_SST[0];
+    gpu::SST_kv* pskv = m_.L0_h_skv_sorted;
+    char* dst = m_.h_SST[sst_id];
     int dst_off = 0;
 
     // Get all key-Value
@@ -118,6 +121,10 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
                     // gpu::EncodeValueOffset()
       pskv[kv_cnt].value_size = value.size();
 
+      //do EncodeValueOffset here wp
+      pskv[kv_cnt].value_offset = (pskv[kv_cnt].value_offset & 0x00FFFFFF) | (sst_id << 24);
+
+
       assert(value.size());
       dst_off += value.size();
       ++kv_cnt;
@@ -128,15 +135,19 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
     /// meta->largest.DebugString().data(), kv_cnt);
       
 
-    gpu::cudaMemHtD(m_.d_SST[0], m_.h_SST[0], dst_off);
-    gpu::cudaMemHtD(m_.d_skv_sorted, m_.h_skv_sorted,
+    gpu::cudaMemHtD(m_.d_SST[sst_id], m_.h_SST[sst_id], dst_off);
+    gpu::cudaMemHtD(m_.L0_d_skv_sorted_2, m_.L0_h_skv_sorted,
                     sizeof(gpu::SST_kv) * kv_cnt);
 
-    gpu::SSTEncode encode(m_.h_SST[0], kv_cnt, 0);
-    encode.SetMemory(&m_, 0);
-    // encode.DoEncode();
+    gpu::SSTEncode encode(m_.h_SST[sst_id], kv_cnt, sst_id);
+    encode.SetMemory(&m_, 0,true);
+
     encode.DoEncode_1(true);
     encode.DoEncode_2(true);
+
+    // encode.DoEncode_1();
+    // encode.DoEncode_2();
+
     encode.DoEncode_3();
     encode.DoEncode_4();
 
@@ -144,10 +155,9 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
 
     gpu::SST_kv* temp=m_.getL0skv();
     gpu::cudaMemDtH(temp,encode.l0_d_skv_,sizeof(gpu::SST_kv) * kv_cnt);
-    //gpu::cudaMemDtH(temp,encode.d_skv_,sizeof(gpu::SST_kv) * kv_cnt);
-      //memcpy(temp,m_.h_skv_sorted,sizeof(gpu::SST_kv) * kv_cnt);
       m_.l0_hkv[fname]=temp;
       m_.l0_knum[fname]=kv_cnt;
+
     //printf("kv_cnt==%d\n",kv_cnt);
 
 
@@ -683,6 +693,14 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
 }
 
 void DBImpl::CompactMemTable() {
+  imm_mutex_.Lock();
+  do_Flush=true;
+  if(!imm_)
+  {
+    do_Flush=false;
+    imm_mutex_.Unlock();
+    return;
+  }
   mutex_.AssertHeld();
   assert(imm_ != nullptr);
 
@@ -713,6 +731,9 @@ void DBImpl::CompactMemTable() {
   } else {
     RecordBackgroundError(s);
   }
+  do_Flush=false;
+  Log(options_.info_log, "CompactMemTable Finished");
+  imm_mutex_.Unlock();
 }
 
 void DBImpl::CompactRange(const Slice* begin, const Slice* end) {
@@ -799,6 +820,12 @@ void DBImpl::MaybeScheduleCompaction() {
   mutex_.AssertHeld();
   if (background_compaction_scheduled_) {
     // Already scheduled
+    // Already scheduled
+    if((do_Flush==false&&imm_!=nullptr)||do_Compaction<1)
+    {
+      background_compaction_scheduled_ = true;
+      env_->Schedule(&DBImpl::BGWork, this);
+    }
   } else if (shutting_down_.load(std::memory_order_acquire)) {
     // DB is being deleted; no more background compactions
   } else if (!bg_error_.ok()) {
@@ -819,7 +846,7 @@ void DBImpl::BGWork(void* db) {
 
 void DBImpl::BackgroundCall() {
   MutexLock l(&mutex_);
-  assert(background_compaction_scheduled_);
+  //assert(background_compaction_scheduled_);
   if (shutting_down_.load(std::memory_order_acquire)) {
     // No more background work when shutting down.
   } else if (!bg_error_.ok()) {
@@ -828,7 +855,10 @@ void DBImpl::BackgroundCall() {
     BackgroundCompaction();
   }
 
-  background_compaction_scheduled_ = false;
+  if(!do_Flush&&!do_Compaction)
+  {
+   background_compaction_scheduled_ = false;
+  }
 
   // Previous compaction may have produced too many files in a level,
   // so reschedule another compaction if needed.
@@ -838,12 +868,24 @@ void DBImpl::BackgroundCall() {
 
 void DBImpl::BackgroundCompaction() {
   mutex_.AssertHeld();
+  if(do_Flush&&do_Compaction>=1)
+  {
+    return;
+  }
 
-  if (imm_ != nullptr) {
+  if (imm_ != nullptr&&!do_Flush) {
     // 下写imm_内存到文件系统中
     CompactMemTable();
     return;
   }
+  if(do_Compaction>=1)
+  {
+   return;
+  }
+ 
+  compaction_mutex_.Lock();
+  do_Compaction++;
+  
 
   Compaction* c;
   bool is_manual = (manual_compaction_ != nullptr);
@@ -919,6 +961,8 @@ void DBImpl::BackgroundCompaction() {
     }
     manual_compaction_ = nullptr;
   }
+  do_Compaction--;
+  compaction_mutex_.Unlock();
 }
 
 void DBImpl::CleanupCompaction(CompactionState* compact) {
@@ -1452,7 +1496,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   // Compute SST number
   std::vector<int> SST_kv_cnts;
   int keys = 0, file_size = 0;
-  ;
+
   // printf(" (%d) ", sort.out_size_);
   for (int i = 0; i < last_keys; ++i) {
     gpu::SST_kv* pskv = sort.out_;
@@ -1935,6 +1979,7 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       // this delay hands over some CPU to the compaction thread in
       // case it is sharing the same core as the writer.
       mutex_.Unlock();
+      Log(options_.info_log, "kL0_SlowdownWritesTrigger; waiting...\n");
       env_->SleepForMicroseconds(
           1000);  // 这里需要睡眠等待1ms， 这样IOPS就会限制到1000以下
       allow_delay = false;  // Do not delay a single write more than once

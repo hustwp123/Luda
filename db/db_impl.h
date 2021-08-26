@@ -173,6 +173,11 @@ public:
   FileLock* db_lock_;
 
   // State below is protected by mutex_
+  port::Mutex imm_mutex_;
+  bool do_Flush=false;
+  int do_Compaction=0;
+  port::Mutex compaction_mutex_;
+
   port::Mutex mutex_;
   std::atomic<bool> shutting_down_;
   port::CondVar background_work_finished_signal_ GUARDED_BY(mutex_);
