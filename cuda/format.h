@@ -26,6 +26,8 @@ bool BlockHandle::DecodeFrom(Slice *input) {
     return true;
 }
 
+
+
 void Footer::EncodeTo(Buffer *dst) {
     assert(dst->total_ == leveldb::Footer::kEncodedLength); // 20 + 20 + 8 = 48
     metaindex_handle_.EncodeTo(dst);

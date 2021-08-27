@@ -158,8 +158,6 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
       m_.l0_hkv[fname]=temp;
       m_.l0_knum[fname]=kv_cnt;
 
-    //printf("kv_cnt==%d\n",kv_cnt);
-
 
     // Finish and check for builder errors
     meta->file_size = encode.cur_;
@@ -1349,11 +1347,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     if(!useWP)
     {
       p->FindInMem(filename,&m_);
-      // bool f=p->FindInMem(filename,&m_);
-      // if(f)
-      // {
-      //   printf("get in Mem num==%d\n",p->all_kv_);
-      // }
     }
     low_decode.push_back(p);
   }
@@ -1643,10 +1636,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
     ::fsync(fileno(file));
     ::fclose(file);
-
-    // wr[i].name = name;
-    // wr[i].encode = pencode;
-    // pthread_create(&tidp[i], NULL, thread_write_file, (void*)&wr[i]);
 
     last_keys -= kv_cnt;
     delete pencode;
