@@ -705,6 +705,12 @@ __host__ Slice SSTSort::GetCurrent(std::vector<SST_kv*>& skvs,
 
   SST_kv* pskv = skvs[sst_idx];
   int skv_idx = idxs[sst_idx];
+
+  if(skv_idx >= sizes[sst_idx])
+  {
+    return Slice(NULL, 0);
+    //fprintf(stderr,"skv_idx:%d   sizes[sst_idx]:%d \n",skv_idx,sizes[sst_idx]);
+  }
   assert(skv_idx < sizes[sst_idx]);
 
   return Slice(pskv[skv_idx].ikey, pskv[skv_idx].key_size,
@@ -1221,6 +1227,7 @@ __host__ void SSTEncode::DoEncode() {
 }
 
 __host__ void SSTEncode::DoEncode_1(bool f) {
+ // assert(0);
   cudaStream_t s1 = (cudaStream_t)s1_.data();
   if (f)
     GPUEncodeSharedKernel<<<M, N, 0, s1>>>(d_skv_, d_skv_new_, base_, kv_count_,

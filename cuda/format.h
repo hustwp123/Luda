@@ -21,8 +21,10 @@ void BlockHandle::EncodeTo(Buffer* dst) {
 
      
 bool BlockHandle::DecodeFrom(Slice *input) {
-    assert(GetVarint64(input, &offset_));
-    assert(GetVarint64(input, &size_));
+    //assert(GetVarint64(input, &offset_));
+    //assert(GetVarint64(input, &size_));
+    GetVarint64(input, &offset_);
+    GetVarint64(input, &size_);
     return true;
 }
 

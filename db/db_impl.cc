@@ -1601,7 +1601,8 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     pthread_create(&tidp[i], NULL, thread_write_file, (void*)&wr[i]);
 
     last_keys -= kv_cnt;
-    // delete pencode;
+
+     //delete pencode;
   }
 
   {
