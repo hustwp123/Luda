@@ -4,17 +4,17 @@
 
 #include "db/version_set.h"
 
-#include <stdio.h>
-
-#include <algorithm>
-
 #include "db/filename.h"
 #include "db/log_reader.h"
 #include "db/log_writer.h"
 #include "db/memtable.h"
 #include "db/table_cache.h"
+#include <algorithm>
+#include <stdio.h>
+
 #include "leveldb/env.h"
 #include "leveldb/table_builder.h"
+
 #include "table/merger.h"
 #include "table/two_level_iterator.h"
 #include "util/coding.h"
@@ -842,7 +842,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
 
   // Unlock during expensive MANIFEST log write
   {
-    //mu->Unlock();
+    // mu->Unlock();
 
     // Write new record to MANIFEST log
     if (s.ok()) {
@@ -863,7 +863,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
       s = SetCurrentFile(env_, dbname_, manifest_file_number_);
     }
 
-    //mu->Lock();
+    // mu->Lock();
   }
 
   // Install the new version
@@ -1254,7 +1254,7 @@ Iterator* VersionSet::MakeInputIterator(Compaction* c) {
   int num = 0;
   for (int which = 0; which < 2; which++) {
     if (!c->inputs_[which].empty()) {
-      if (c->level() + which == 0) { // level 0 层
+      if (c->level() + which == 0) {  // level 0 层
         const std::vector<FileMetaData*>& files = c->inputs_[which];
         for (size_t i = 0; i < files.size(); i++) {
           // 这个就是一个读 *单独SST* 文件的迭代器，比较容易理解
@@ -1276,21 +1276,88 @@ Iterator* VersionSet::MakeInputIterator(Compaction* c) {
   return result;
 }
 
+Compaction* VersionSet::PickL1Compaction() {
+  Compaction* c;
+  int level = 1;
+  if (compactLevels.find(1) != compactLevels.end()) {
+    return nullptr;
+  }
+  c = new Compaction(options_, level);
+  // Pick the first file that comes after compact_pointer_[level]
+  for (size_t i = 0; i < current_->files_[level].size(); i++) {
+    FileMetaData* f = current_->files_[level][i];
+    if (compact_pointer_[level].empty() ||
+        icmp_.Compare(f->largest.Encode(), compact_pointer_[level]) > 0) {
+      c->inputs_[0].push_back(f);
+      break;
+    }
+  }
+  if (c->inputs_[0]
+          .empty()) {  // 如果没有找到合适的，那么直接选取第一个作为compaction的文件
+    // Wrap-around to the beginning of the key space
+    if (current_->files_[level].empty()) {
+      delete c;
+      compactLevels.erase(level);
+      return nullptr;
+    }
+    c->inputs_[0].push_back(current_->files_[level][0]);
+  }
+  c->input_version_ = current_;
+  c->input_version_->Ref();
+  SetupOtherInputs(c);
+  return c;
+}
+
 // 使用1.文件过多  2.seek过多 两种方式选取文件，放在inputs_[2]中
 // 后面会补充： 1. level层边界的文件 2. level层与inputs_[1]中有重叠的
 Compaction* VersionSet::PickCompaction() {
   Compaction* c;
-  int level;
+  int level = -1;
 
-  // 这里说的意思是 一层中数据过多可以出发compaction，同时seek过多也可以出发compaction
-  // We prefer compactions triggered by too much data in a level over
-  // the compactions triggered by seeks.
+  // 这里说的意思是
+  // 一层中数据过多可以出发compaction，同时seek过多也可以出发compaction We
+  // prefer compactions triggered by too much data in a level over the
+  // compactions triggered by seeks.
   const bool size_compaction = (current_->compaction_score_ >= 1);
   const bool seek_compaction = (current_->file_to_compact_ != nullptr);
 
   // 由某层的file过多引起的Compaction
   if (size_compaction) {
-    level = current_->compaction_level_;
+    if (compactLevels.find(current_->compaction_level_) !=
+        compactLevels.end()) {
+      int best_level = -1;
+      double best_score = -1;
+
+      for (int ttt = 0; ttt < config::kNumLevels - 1; ttt++) {
+        if (compactLevels.find(ttt) != compactLevels.end()) {
+          continue;
+        }
+        if (ttt == 0) {
+          if (current_->files_[level].size() >= 55) {
+            continue;
+          }
+        }
+        double score;
+        if (ttt == 0) {
+          score = current_->files_[ttt].size() /
+                  static_cast<double>(config::kL0_CompactionTrigger);
+        } else {
+          // Compute the ratio of current size to size limit.
+          const uint64_t level_bytes = TotalFileSize(current_->files_[ttt]);
+          score = static_cast<double>(level_bytes) /
+                  MaxBytesForLevel(options_, ttt);
+        }
+        if (score > best_score) {
+          best_level = ttt;
+          best_score = score;
+        }
+      }
+      level = best_level;
+    } else {
+      level = current_->compaction_level_;
+    }
+    compactLevels.insert(level);
+
     assert(level >= 0);
     assert(level + 1 < config::kNumLevels);
     c = new Compaction(options_, level);
@@ -1304,14 +1371,25 @@ Compaction* VersionSet::PickCompaction() {
         break;
       }
     }
-    if (c->inputs_[0].empty()) { // 如果没有找到合适的，那么直接选取第一个作为compaction的文件
+    if (c->inputs_[0]
+            .empty()) {  // 如果没有找到合适的，那么直接选取第一个作为compaction的文件
       // Wrap-around to the beginning of the key space
+      if (current_->files_[level].empty()) {
+        delete c;
+        compactLevels.erase(level);
+        return nullptr;
+      }
       c->inputs_[0].push_back(current_->files_[level][0]);
     }
   }
   // 由Seek过多引起的compaction, 直接就是file_to_compact_
   else if (seek_compaction) {
+    if (compactLevels.find(current_->file_to_compact_level_) !=
+        compactLevels.end()) {
+      return nullptr;
+    }
     level = current_->file_to_compact_level_;
+    compactLevels.insert(level);
     c = new Compaction(options_, level);
     c->inputs_[0].push_back(current_->file_to_compact_);
   } else {
@@ -1335,6 +1413,11 @@ Compaction* VersionSet::PickCompaction() {
 
   // 后面会补充： 1. level层边界的文件 2. level层与inputs_[1]中有重叠的
   SetupOtherInputs(c);
+  if (level == 0 && c->num_input_files(1) >= 55) {
+    compactLevels.erase(0);
+    delete c;
+    return PickL1Compaction();
+  }
 
   return c;
 }
@@ -1596,7 +1679,7 @@ bool Compaction::ShouldStopBefore(const Slice& internal_key) {
   if (overlapped_bytes_ > MaxGrandParentOverlapBytes(vset->options_)) {
     // Too much overlap for current output; start new output
     overlapped_bytes_ = 0;
-	//printf("Should Stop\n");
+    // printf("Should Stop\n");
     return true;
   } else {
     return false;

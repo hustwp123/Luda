@@ -145,7 +145,7 @@ public:
   void BackgroundCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   void CleanupCompaction(CompactionState* compact)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-  Status DoCompactionWork(CompactionState* compact)
+  Status DoCompactionWork(CompactionState* compact,gpu::HostAndDeviceMemory* m_)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   Status OpenCompactionOutputFile(CompactionState* compact);
@@ -212,7 +212,8 @@ public:
   CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
 
   // GPU
-  gpu::HostAndDeviceMemory m_;
+  gpu::HostAndDeviceMemory m1;
+  gpu::HostAndDeviceMemory m2;
   std::atomic<bool> gpu_write_l0_;
   Status GPUWriteLevel0(const std::string& dbname, Env* env, const Options& options,
                     TableCache* table_cache, Iterator* iter, FileMetaData* meta);

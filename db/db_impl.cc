@@ -87,6 +87,7 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
                               const Options& options, TableCache* table_cache,
                               Iterator* iter, FileMetaData* meta) {
   // uint64_t time1=env_->NowMicros();
+  gpu::HostAndDeviceMemory* m_=&m1;
   Status s;
   meta->file_size = 0;
   iter->SeekToFirst();
@@ -102,8 +103,8 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
   std::string fname = TableFileName(dbname, meta->number);
   if (iter->Valid()) {
     int kv_cnt = 0;
-    gpu::SST_kv* pskv = m_.L0_h_skv_sorted;
-    char* dst = m_.h_SST[sst_id];
+    gpu::SST_kv* pskv = m_->L0_h_skv_sorted;
+    char* dst = m_->h_SST[sst_id];
     int dst_off = 0;
 
     // Get all key-Value
@@ -135,12 +136,12 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
     /// meta->largest.DebugString().data(), kv_cnt);
       
 
-    gpu::cudaMemHtD(m_.d_SST[sst_id], m_.h_SST[sst_id], dst_off);
-    gpu::cudaMemHtD(m_.L0_d_skv_sorted_2, m_.L0_h_skv_sorted,
+    gpu::cudaMemHtD(m_->d_SST[sst_id], m_->h_SST[sst_id], dst_off);
+    gpu::cudaMemHtD(m_->L0_d_skv_sorted_2, m_->L0_h_skv_sorted,
                     sizeof(gpu::SST_kv) * kv_cnt);
 
-    gpu::SSTEncode encode(m_.h_SST[sst_id], kv_cnt, sst_id);
-    encode.SetMemory(&m_, 0,true);
+    gpu::SSTEncode encode(m_->h_SST[sst_id], kv_cnt, sst_id);
+    encode.SetMemory(m_, 0,true);
 
     encode.DoEncode_1(true);
     encode.DoEncode_2(true);
@@ -153,10 +154,10 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
 
 
 
-    gpu::SST_kv* temp=m_.getL0skv();
+    gpu::SST_kv* temp=m_->getL0skv();
     gpu::cudaMemDtH(temp,encode.l0_d_skv_,sizeof(gpu::SST_kv) * kv_cnt);
-      m_.l0_hkv[fname]=temp;
-      m_.l0_knum[fname]=kv_cnt;
+      m_->l0_hkv[fname]=temp;
+      m_->l0_knum[fname]=kv_cnt;
 
 
     // Finish and check for builder errors
@@ -816,21 +817,21 @@ void DBImpl::RecordBackgroundError(const Status& s) {
 
 void DBImpl::MaybeScheduleCompaction() {
   mutex_.AssertHeld();
-  if (background_compaction_scheduled_) {
-    // Already scheduled
-    // Already scheduled
-    if((do_Flush==false&&imm_!=nullptr)||do_Compaction<1)
-    {
-      background_compaction_scheduled_ = true;
-      env_->Schedule(&DBImpl::BGWork, this);
-    }
-  } else if (shutting_down_.load(std::memory_order_acquire)) {
+  if (shutting_down_.load(std::memory_order_acquire)) {
     // DB is being deleted; no more background compactions
   } else if (!bg_error_.ok()) {
     // Already got an error; no more changes
   } else if (imm_ == nullptr && manual_compaction_ == nullptr &&
              !versions_->NeedsCompaction()) {
     // No work to be done
+  }else if (background_compaction_scheduled_) {
+    // Already scheduled
+    // Already scheduled
+    if((do_Flush==false&&imm_!=nullptr)||do_Compaction<2)
+    {
+      background_compaction_scheduled_ = true;
+      env_->Schedule(&DBImpl::BGWork, this);
+    }
   } else {
     // 启动一个线程BGWork，本质上还是BackgroundCall()
     background_compaction_scheduled_ = true;
@@ -866,7 +867,7 @@ void DBImpl::BackgroundCall() {
 
 void DBImpl::BackgroundCompaction() {
   mutex_.AssertHeld();
-  if(do_Flush&&do_Compaction>=1)
+  if(do_Flush&&do_Compaction>=2)
   {
     return;
   }
@@ -876,12 +877,11 @@ void DBImpl::BackgroundCompaction() {
     CompactMemTable();
     return;
   }
-  if(do_Compaction>=1)
+  if(do_Compaction>=2)
   {
    return;
   }
  
-  compaction_mutex_.Lock();
   do_Compaction++;
   
 
@@ -927,14 +927,39 @@ void DBImpl::BackgroundCompaction() {
         static_cast<unsigned long long>(f->file_size),
         status.ToString().c_str(), versions_->LevelSummary(&tmp));
   } else {
+   // fprintf(stderr,"test1\n");
     CompactionState* compact = new CompactionState(c);
-    status = DoCompactionWork(compact);
+    if(m1.in_use&&m2.in_use)
+    {
+      fprintf(stderr,"error both in use\n");
+    }
+    gpu::HostAndDeviceMemory* m_;
+    if(!m1.in_use)
+    {
+   //  fprintf(stderr,"use1   level==%d \n",c->level());
+      m_=&m1;
+    }
+    else
+    {
+   //  fprintf(stderr,"use2 level==%d \n",c->level());
+      m_=&m2;
+    }
+    m_->in_use=true;
+   // fprintf(stderr,"test1 \n");
+    status = DoCompactionWork(compact,m_);
+   // fprintf(stderr,"test2 \n");
     if (!status.ok()) {
       RecordBackgroundError(status);
     }
     CleanupCompaction(compact);
     c->ReleaseInputs();
     DeleteObsoleteFiles();
+    m_->in_use=false;
+   // fprintf(stderr,"test3\n");
+  }
+  if(c!=nullptr)
+  {
+    versions_->compactLevels.erase(c->level());
   }
   delete c;
 
@@ -960,7 +985,7 @@ void DBImpl::BackgroundCompaction() {
     manual_compaction_ = nullptr;
   }
   do_Compaction--;
-  compaction_mutex_.Unlock();
+ // fprintf(stderr,"return size==%d \n",versions_->compactLevels.size());
 }
 
 void DBImpl::CleanupCompaction(CompactionState* compact) {
@@ -1264,7 +1289,8 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 /*
  * The final VERSION of GPU
  */
-Status DBImpl::DoCompactionWork(CompactionState* compact) {
+Status DBImpl::DoCompactionWork(CompactionState* compact,gpu::HostAndDeviceMemory* m_) {
+  //fprintf(stderr,"DoCompactionWork test1\n");
   
   const uint64_t start_micros = env_->NowMicros();
   int64_t imm_micros = 0;  // Micros spent doing imm_ compactions
@@ -1297,7 +1323,9 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   }
 
   // Release mutex while we're actually doing the compaction work
+  //fprintf(stderr,"DoCompactionWork test2\n");
   mutex_.Unlock();
+  // gpu::HostAndDeviceMemory* m_=&m1;
 
   // 两层迭代器，遍历inputs_[2]中的所有KV
   ///////////// BEGIN ///////////////////
@@ -1337,31 +1365,33 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   //bool useWP = false;
 
   // Decode SST
+ // fprintf(stderr,"DoCompactionWork test3\n");
   std::vector<gpu::SSTDecode*> low_decode, high_decode;
   int sst_idx = 0;
   for (auto& low : compact->compaction->inputs_[0]) {
     std::string filename = TableFileName(dbname_, low->number);
     gpu::SSTDecode* p;
-      p =new gpu::SSTDecode(filename.data(), low->file_size, m_.h_SST[sst_idx],filename);
-    p->SetMemory(sst_idx++, &m_);
+      p =new gpu::SSTDecode(filename.data(), low->file_size, m_->h_SST[sst_idx],filename);
+    p->SetMemory(sst_idx++, m_);
 
     if(!useWP)
     {
-      p->FindInMem(filename,&m_);
+      p->FindInMem(filename,m_);
     }
 
     low_decode.push_back(p);
   }
-
+ // fprintf(stderr,"DoCompactionWork test3.1\n");
   IMM_WRITE();
   for (auto& high : compact->compaction->inputs_[1]) {
     std::string filename = TableFileName(dbname_, high->number);
     ////printf("%s ", filename.data());
     gpu::SSTDecode* p =
-        new gpu::SSTDecode(filename.data(), high->file_size, m_.h_SST[sst_idx],filename);
-    p->SetMemory(sst_idx++, &m_);
+        new gpu::SSTDecode(filename.data(), high->file_size, m_->h_SST[sst_idx],filename);
+    p->SetMemory(sst_idx++, m_);
     high_decode.push_back(p);
   }
+ // fprintf(stderr,"DoCompactionWork test3.2\n");
   uint64_t duration = (env_->NowMicros() - compaction_start);
   compaction_start = env_->NowMicros();
   // printf("read-files time:%ld ", duration);
@@ -1369,10 +1399,12 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   IMM_WRITE();
 
   // Encode AND Sort
+ // fprintf(stderr,"DoCompactionWork test4\n");
   gpu::SSTCompactionUtil util(compact->compaction->input_version_,
                               compact->compaction->level());
-  gpu::SSTSort sort(compact->smallest_snapshot, m_.h_skv_sorted, &util,
-                    m_.d_skv_sorted);
+  gpu::SSTSort sort(compact->smallest_snapshot, m_->h_skv_sorted, &util,
+                    m_->d_skv_sorted);
+ // fprintf(stderr,"DoCompactionWork test4.1\n");                  
   
   int low_kvs = 0;
   int high_kvs = 0;
@@ -1380,15 +1412,18 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   int high_index = 0;
 
   if (!useWP) {
+   // fprintf(stderr,"!useWp decode\n");
     for (auto& p : low_decode) {
       if(!p->inMem)
         p->DoDecode();
       else
         p->Copy();
     }
+   // fprintf(stderr,"!useWp decode 0.1 high_decode size==%d\n",high_decode.size());
     for (auto& p : high_decode) {
       p->DoDecode();
     }
+   // fprintf(stderr,"!useWp decode1\n");
     for (auto& p : low_decode) {
       if(!p->inMem)
         p->DoGPUDecode_1();
@@ -1396,6 +1431,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     for (auto& p : high_decode) {
       p->DoGPUDecode_1();
     }
+  //  fprintf(stderr,"!useWp decode2\n");
     for (auto& p : low_decode) {
       if(!p->inMem)
         p->DoGPUDecode_2();
@@ -1404,6 +1440,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
       p->DoGPUDecode_2();
     }
   } else {
+  //  fprintf(stderr,"useWp decode\n");
     for (auto& p : low_decode) {
       p->DoDecode();
       low_kvs += p->all_kv_;
@@ -1413,12 +1450,13 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
       high_kvs += p->all_kv_;
     }
 
-    sort.AllocLow(low_kvs, &m_);
-    sort.AllocHigh(high_kvs, &m_);
+    sort.AllocLow(low_kvs, m_);
+    sort.AllocHigh(high_kvs, m_);
     sort.num = low_kvs + high_kvs;
     sort.low_num = low_kvs;
     sort.high_num = high_kvs;
-    sort.AllocResult(sort.num, &m_);
+    sort.AllocResult(sort.num, m_);
+   // fprintf(stderr,"useWp decode1\n");
     for (auto& p : low_decode) {
       p->DoGPUDecode_1(sort.low_slices + low_index);
       low_index += p->all_kv_;
@@ -1429,6 +1467,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     }
     low_index = 0;
     high_index = 0;
+   // fprintf(stderr,"useWp decode2\n");
     for (auto& p : low_decode) {
       p->DoGPUDecode_2(sort.low_slices, low_index);
       low_index += p->all_kv_;
@@ -1438,6 +1477,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
       high_index += p->all_kv_;
     }
   }
+ // fprintf(stderr,"DoCompactionWork test5\n");
 
   IMM_WRITE();
 
@@ -1474,6 +1514,8 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     sort.Sort();
   }
 
+  //fprintf(stderr,"DoCompactionWork test5.1\n");
+
   IMM_WRITE();
 
   duration = (env_->NowMicros() - compaction_start);
@@ -1481,7 +1523,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   // printf("Sort time:%ld ", duration);
 
   // Encode
-  gpu::cudaMemHtD(m_.d_skv_sorted, sort.out_,
+  gpu::cudaMemHtD(m_->d_skv_sorted, sort.out_,
                   sizeof(gpu::SST_kv) * sort.out_size_);
 
 
@@ -1492,6 +1534,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   // Compute SST number
   std::vector<int> SST_kv_cnts;
   int keys = 0, file_size = 0;
+  //fprintf(stderr,"DoCompactionWork test6\n");
 
   // printf(" (%d) ", sort.out_size_);
   for (int i = 0; i < last_keys; ++i) {
@@ -1525,11 +1568,12 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   for (int i = 0; i < SST_kv_cnts.size(); ++i) {
     // int kv_cnt = keys_per_SST <= last_keys ? keys_per_SST : last_keys;
     int kv_cnt = SST_kv_cnts[i];
-    gpu::SSTEncode* p = new gpu::SSTEncode(m_.h_SST[i], kv_cnt, i);
-    p->SetMemory(&m_, sort.out_size_ - last_keys);
+    gpu::SSTEncode* p = new gpu::SSTEncode(m_->h_SST[i], kv_cnt, i);
+    p->SetMemory(m_, sort.out_size_ - last_keys);
     last_keys -= kv_cnt;
     encodes.push_back(p);
   }
+  //fprintf(stderr,"DoCompactionWork test7\n");
   IMM_WRITE();
   // std::vector<std::thread> threads;
   // for(int i=0;i<encodes.size();i++)
@@ -1558,6 +1602,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     p->DoEncode_4();
   }
   IMM_WRITE();
+  //fprintf(stderr,"DoCompactionWork test8\n");
 
   last_keys = sort.out_size_;
   duration = (env_->NowMicros() - compaction_start);
@@ -1573,7 +1618,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     gpu::SSTEncode* pencode = encodes[i];
 
     // Write One SST
-    gpu::SST_kv* p = m_.h_skv_sorted;
+    gpu::SST_kv* p = m_->h_skv_sorted;
     int kv_start = sort.out_size_ - last_keys;
     Slice smallerst(p[kv_start].ikey, p[kv_start].key_size);
     Slice largest(p[kv_start + kv_cnt - 1].ikey,
@@ -1615,7 +1660,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     gpu::SSTEncode* pencode = encodes[i];
 
     // Write One SST
-    gpu::SST_kv* p = m_.h_skv_sorted;
+    gpu::SST_kv* p = m_->h_skv_sorted;
     int kv_start = sort.out_size_ - last_keys;
     Slice smallerst(p[kv_start].ikey, p[kv_start].key_size);
     Slice largest(p[kv_start + kv_cnt - 1].ikey,
@@ -1650,6 +1695,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   for (int i = 0; i < SST_kv_cnts.size()-1; ++i) {
     pthread_join(tidp[i], NULL);
   }
+ // fprintf(stderr,"DoCompactionWork test9\n");
 
   duration = (env_->NowMicros() - compaction_start);
   // printf("writefiles time:%ld size==%d \n", duration,SST_kv_cnts.size());
@@ -1972,7 +2018,7 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       // this delay hands over some CPU to the compaction thread in
       // case it is sharing the same core as the writer.
       mutex_.Unlock();
-      //Log(options_.info_log, "kL0_SlowdownWritesTrigger; waiting...\n");
+      Log(options_.info_log, "kL0_SlowdownWritesTrigger; waiting...\n");
       env_->SleepForMicroseconds(
           1000);  // 这里需要睡眠等待1ms， 这样IOPS就会限制到1000以下
       allow_delay = false;  // Do not delay a single write more than once
