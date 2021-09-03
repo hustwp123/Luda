@@ -1344,10 +1344,12 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     gpu::SSTDecode* p;
       p =new gpu::SSTDecode(filename.data(), low->file_size, m_.h_SST[sst_idx],filename);
     p->SetMemory(sst_idx++, &m_);
+
     if(!useWP)
     {
       p->FindInMem(filename,&m_);
     }
+
     low_decode.push_back(p);
   }
 
@@ -1410,6 +1412,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
       p->DoDecode();
       high_kvs += p->all_kv_;
     }
+
     sort.AllocLow(low_kvs, &m_);
     sort.AllocHigh(high_kvs, &m_);
     sort.num = low_kvs + high_kvs;
@@ -1538,6 +1541,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   //     current_thread.join();
   // }
 
+
   for (auto& p : encodes) {
     p->DoEncode_1();
   }
@@ -1663,7 +1667,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   for (size_t i = 0; i < compact->outputs.size(); i++) {
     stats.bytes_written += compact->outputs[i].file_size;
   }
-
   mutex_.Lock();
   stats_[compact->compaction->level() + 1].Add(stats);
 
@@ -1969,7 +1972,7 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       // this delay hands over some CPU to the compaction thread in
       // case it is sharing the same core as the writer.
       mutex_.Unlock();
-      Log(options_.info_log, "kL0_SlowdownWritesTrigger; waiting...\n");
+      //Log(options_.info_log, "kL0_SlowdownWritesTrigger; waiting...\n");
       env_->SleepForMicroseconds(
           1000);  // 这里需要睡眠等待1ms， 这样IOPS就会限制到1000以下
       allow_delay = false;  // Do not delay a single write more than once

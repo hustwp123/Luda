@@ -1,0 +1,17 @@
+GeForce GTX 1080 Ti : 1582.000 Mhz   (Ordinal 0)
+28 SMs enabled. Compute Capability sm_61
+FreeMem:  11019MB   TotalMem:  11178MB   64-bit pointers.
+Mem Clock: 5505.000 Mhz x 352 bits   (484.4 GB/s)
+ECC Disabled
+
+
+Keys:       16 bytes each
+Values:     256 bytes each (256 bytes after compression)
+Entries:    1000000
+RawSize:    259.4 MB (estimated)
+FileSize:   259.4 MB (estimated)
+WARNING: Optimization is disabled: benchmarks unnecessarily slow
+WARNING: Assertions are enabled; benchmarks unnecessarily slow
+------------------------------------------------
+max-key:62350 max-gdi:15687 blk:3615 M:2048 MaxOutFile:15728640
+max-key:62350 max-gdi:15687 blk:3615 M:2048 MaxOutFile:15728640

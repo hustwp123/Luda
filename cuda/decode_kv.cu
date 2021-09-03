@@ -974,18 +974,20 @@ __host__ void SSTEncode::ComputeDataBlockOffset(int SC) {  // SC: shared_count
 
   datablock_count_ = (shared_count_ + SC - 1) / SC;
   bmeta_.resize(datablock_count_);
+  //fprintf(stderr,"datablock_count_=%d  CUDA_MAX_GDI_PER_SST=%d \n",datablock_count_,CUDA_MAX_GDI_PER_SST);
 
   for (int i = 0; i < datablock_count_; ++i) {
     int cnt = 0, sc = 0;
     uint32_t boffset = cur_;
     h_fmeta_[i].start = kv_count_ - kv_cnt_last + base_;
 
+
     for (int j = 0; j < SC; ++j) {  // 遍历一个DataBlock中的所有SharedBlock
       int idx = i * SC + j;
+
       int sc_cnt =
           (kSharedKeys <= kv_cnt_last - cnt) ? kSharedKeys : kv_cnt_last - cnt;
       if (idx >= shared_count_) break;
-
       ++sc;
       cnt += sc_cnt;
       h_shared_offset_[idx] = (cur_ << 8) | sc_cnt;
@@ -1227,7 +1229,7 @@ __host__ void SSTEncode::DoEncode() {
 }
 
 __host__ void SSTEncode::DoEncode_1(bool f) {
- // assert(0);
+  // assert(0);
   cudaStream_t s1 = (cudaStream_t)s1_.data();
   if (f)
     GPUEncodeSharedKernel<<<M, N, 0, s1>>>(d_skv_, d_skv_new_, base_, kv_count_,
@@ -1245,10 +1247,10 @@ __host__ void SSTEncode::DoEncode_2(bool f) {
                   sizeof(uint32_t) * shared_count_, cudaMemcpyDeviceToHost, s1);
   cudaStreamSynchronize(s1);
 
+
   ComputeDataBlockOffset();
   cudaMemcpyAsync(d_shared_offset_, h_shared_offset_,
                   sizeof(uint32_t) * shared_count_, cudaMemcpyHostToDevice, s1);
-
   // dim3 block(32, 16), grid(512, 1);
   dim3 block(32, 16), grid(M, 1);
   if (f) {

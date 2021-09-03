@@ -13,7 +13,7 @@
 #include <vector>
 
 #define K_SHARED_KEYS (4)
-#define CUDA_MAX_COMPACTION_FILES (41)
+#define CUDA_MAX_COMPACTION_FILES (100)
 #define __SST_SIZE (16 * 1024 * 1024)
 #define __MIN_KEY_SIZE (256 + 32)  // 这里假设Value最小为256字节，当然可以更改
 #define CUDA_MAX_KEY_PER_SST (__SST_SIZE / __MIN_KEY_SIZE + 4096)
@@ -515,6 +515,10 @@ class SSTEncode {
 
   void SetMemory(HostAndDeviceMemory* m, int base, bool isFlush = false) {
     base_ = base;
+    if(SST_idx_>=CUDA_MAX_COMPACTION_FILES)
+    {
+      fprintf(stderr,"errrrrrrrrrrrrrrrrrrr\n");
+    }
 
     if (!isFlush) {
       h_skv_ = m->h_skv_sorted + base;

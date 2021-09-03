@@ -1,0 +1,1 @@
+/usr/local/cuda/bin/nvcc -std=c++11 --expt-extended-lambda -gencode arch=compute_35,code=compute_35  -arch=sm_61 CMakeFiles/paper_test.dir/util/decode_kv.cu.o  -O3 -DNDEBUG   CMakeFiles/paper_test.dir/util/testharness.cc.o CMakeFiles/paper_test.dir/util/testutil.cc.o CMakeFiles/paper_test.dir/db/paper_test.cc.o  -o paper_test  libleveldb.a -lsnappy -lpthread 
