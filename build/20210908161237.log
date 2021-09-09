@@ -1,0 +1,17 @@
+Tesla P4 : 1113.500 Mhz   (Ordinal 0)
+20 SMs enabled. Compute Capability sm_61
+FreeMem:   7116MB   TotalMem:   7611MB   64-bit pointers.
+Mem Clock: 3003.000 Mhz x 256 bits   (192.2 GB/s)
+ECC Enabled
+
+
+Keys:       16 bytes each
+Values:     256 bytes each (256 bytes after compression)
+Entries:    10000000
+RawSize:    2594.0 MB (estimated)
+FileSize:   2594.0 MB (estimated)
+------------------------------------------------
+max-key:62350 max-gdi:15687 blk:3615 M:2048 MaxOutFile:15728640
+max-key:62350 max-gdi:15687 blk:3615 M:2048 MaxOutFile:15728640
+max-key:62350 max-gdi:15687 blk:3615 M:2048 MaxOutFile:15728640
+max-key:62350 max-gdi:15687 blk:3615 M:2048 MaxOutFile:15728640

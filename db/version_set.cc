@@ -1290,6 +1290,7 @@ Compaction* VersionSet::PickCompaction() {
 
   // 由某层的file过多引起的Compaction
   if (size_compaction) {
+    // fprintf(stderr,"size compaction\n");
     level = current_->compaction_level_;
     assert(level >= 0);
     assert(level + 1 < config::kNumLevels);
@@ -1311,6 +1312,7 @@ Compaction* VersionSet::PickCompaction() {
   }
   // 由Seek过多引起的compaction, 直接就是file_to_compact_
   else if (seek_compaction) {
+    // fprintf(stderr,"do seek compaction\n");
     level = current_->file_to_compact_level_;
     c = new Compaction(options_, level);
     c->inputs_[0].push_back(current_->file_to_compact_);

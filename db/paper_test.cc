@@ -53,8 +53,11 @@ void create_db(bool write = false) {
     options.write_buffer_size = 15 * 1024 * 1024;
     options.max_file_size = 15 * 1024 * 1024;
     options.filter_policy = NewBloomFilterPolicy(10);
+    fprintf(stderr,"test 1.1\n");
     leveldb::Status status = leveldb::DB::Open(options, "/mnt/OPTANE280G/wp/testdb4", &db);
+    fprintf(stderr,"test 1.2\n");
     assert(status.ok());
+    fprintf(stderr,"test 1.3\n");
 
     string value(1024 * 1, 'a');
     uint64_t ts, te;
@@ -442,7 +445,9 @@ int main() {
 
     bool create = false;
 
+fprintf(stderr,"test1\n");
     create_db(true); return 0;
+    fprintf(stderr,"test2\n");
     const char *f = "./sst1.ldb";
     uint64_t size = 3895183;
     //size = 2100708;
@@ -457,6 +462,7 @@ int main() {
     }
     //create_db(true);
     test_full_CPU_GPU(f, size);
+    fprintf(stderr,"test3\n");
     //test_SST_correct(f, size);
     return 0;
 }

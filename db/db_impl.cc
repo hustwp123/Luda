@@ -819,11 +819,13 @@ void DBImpl::MaybeScheduleCompaction() {
   if (background_compaction_scheduled_) {
     // Already scheduled
     // Already scheduled
+
     if((do_Flush==false&&imm_!=nullptr)||do_Compaction<1)
     {
       background_compaction_scheduled_ = true;
       env_->Schedule(&DBImpl::BGWork, this);
     }
+
   } else if (shutting_down_.load(std::memory_order_acquire)) {
     // DB is being deleted; no more background compactions
   } else if (!bg_error_.ok()) {
@@ -1339,6 +1341,8 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   // Decode SST
   std::vector<gpu::SSTDecode*> low_decode, high_decode;
   int sst_idx = 0;
+  // fprintf(stderr,"sizeof(inputs_ 0)==%d\n",compact->compaction->inputs_[0].size());
+  // fprintf(stderr,"sizeof(inputs_ 1)==%d\n",compact->compaction->inputs_[1].size());
   for (auto& low : compact->compaction->inputs_[0]) {
     std::string filename = TableFileName(dbname_, low->number);
     gpu::SSTDecode* p;
@@ -1494,13 +1498,24 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   int keys = 0, file_size = 0;
 
   // printf(" (%d) ", sort.out_size_);
+  // fprintf(stderr,"SST_kv_cnts=%d  last_keys==%d\n",SST_kv_cnts.size(),last_keys);
   for (int i = 0; i < last_keys; ++i) {
     gpu::SST_kv* pskv = sort.out_;
 
     file_size += pskv[i].value_size + pskv[i].key_size;
 
     Slice key(sort.out_[i].ikey, sort.out_[i].key_size);
-    if (compact->compaction->ShouldStopBefore(key) || keys >= keys_per_SST ||
+    bool f=compact->compaction->ShouldStopBefore(key);
+    // if(f)
+    // {
+    //   fprintf(stderr,"f==%d\n",f);
+    // }
+    
+    // if(file_size >= compact->compaction->MaxOutputFileSize())
+    // {
+    //   fprintf(stderr,"file_size=%d  compact->compaction->MaxOutputFileSize()=%d\n",file_size,compact->compaction->MaxOutputFileSize());
+    // }
+    if (f|| keys >= keys_per_SST ||
         file_size >= compact->compaction->MaxOutputFileSize() ||
         file_size >= (15 * 1024 * 1024)) {
       SST_kv_cnts.push_back(keys);
@@ -1521,6 +1536,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 
   // Write All SST
   std::vector<gpu::SSTEncode*> encodes;
+  // fprintf(stderr,"SST_kv_cnts=%d  last_keys==%d\n",SST_kv_cnts.size(),last_keys);
   // for (int i = 0; i < SST_cnt; ++i) {
   for (int i = 0; i < SST_kv_cnts.size(); ++i) {
     // int kv_cnt = keys_per_SST <= last_keys ? keys_per_SST : last_keys;
@@ -1595,18 +1611,19 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     std::string name = TableFileName(dbname_, out.number);
     ////printf("(%s %d) ", name.data(), kv_cnt);
 
-    // FILE *file = ::fopen(name.data(), "wb");
-    // ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
-    //     ::fsync(fileno(file));
-    // ::fclose(file);
+    FILE *file = ::fopen(name.data(), "wb");
+    ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
+        ::fsync(fileno(file));
+    ::fclose(file);
+    delete pencode;
 
-    wr[i].name = name;
-    wr[i].encode = pencode;
-    pthread_create(&tidp[i], NULL, thread_write_file, (void*)&wr[i]);
+    // wr[i].name = name;
+    // wr[i].encode = pencode;
+    // pthread_create(&tidp[i], NULL, thread_write_file, (void*)&wr[i]);
 
     last_keys -= kv_cnt;
 
-     //delete pencode;
+     
   }
 
   {
@@ -1647,9 +1664,9 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   }
 
 
-  for (int i = 0; i < SST_kv_cnts.size()-1; ++i) {
-    pthread_join(tidp[i], NULL);
-  }
+  // for (int i = 0; i < SST_kv_cnts.size()-1; ++i) {
+  //   pthread_join(tidp[i], NULL);
+  // }
 
   duration = (env_->NowMicros() - compaction_start);
   // printf("writefiles time:%ld size==%d \n", duration,SST_kv_cnts.size());

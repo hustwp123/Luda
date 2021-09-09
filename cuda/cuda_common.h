@@ -517,7 +517,7 @@ class SSTEncode {
     base_ = base;
     if(SST_idx_>=CUDA_MAX_COMPACTION_FILES)
     {
-      fprintf(stderr,"errrrrrrrrrrrrrrrrrrr\n");
+      fprintf(stderr,"SST_idx==%d  errrrrrrrrrrrrrrrrrrr\n",SST_idx_);
     }
 
     if (!isFlush) {
