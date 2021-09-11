@@ -663,7 +663,7 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
   Status s;
   {
     mutex_.Unlock();
-    //s = BuildTable(dbname_, env_, options_, table_cache_, iter, &meta);
+    // s = BuildTable(dbname_, env_, options_, table_cache_, iter, &meta);
 #if !(GPU_ACCELERATE)
     s = BuildTable(dbname_, env_, options_, table_cache_, iter, &meta);
 #else
@@ -713,8 +713,10 @@ void DBImpl::CompactMemTable() {
   // Save the contents of the memtable as a new Table
   VersionEdit edit;
   Version* base = versions_->current();
+
   base->Ref();
   Status s = WriteLevel0Table(imm_, &edit, base);
+  stats_[config::kNumLevels].times_flush_immtbl++;  // xp
   base->Unref();
 
   if (s.ok() && shutting_down_.load(std::memory_order_acquire)) {
@@ -934,15 +936,12 @@ void DBImpl::BackgroundCompaction() {
   } else {
     CompactionState* compact = new CompactionState(c);
     // status = DoCompactionWork2(compact);
-    if(c->is_seek)
-    {
+    if (c->is_seek) {
       status = DoCompactionWork2(compact);
-    }
-    else
-    {
+    } else {
       status = DoCompactionWork(compact, c->is_seek);
     }
-    
+
     if (!status.ok()) {
       RecordBackgroundError(status);
     }
@@ -1260,6 +1259,9 @@ Status DBImpl::DoCompactionWork2(CompactionState* compact) {
 
   mutex_.Lock();
   stats_[compact->compaction->level() + 1].Add(stats);
+  stats_[config::kNumLevels].AddMore(stats);  // xp
+  stats_[compact->compaction->level() + 1].AddReason(
+      stats, compact->compaction->GetReason());
 
   if (status.ok()) {
     status = InstallCompactionResults(compact);
@@ -1878,6 +1880,9 @@ Status DBImpl::DoCompactionWork(CompactionState* compact, bool isSeek) {
   }
   mutex_.Lock();
   stats_[compact->compaction->level() + 1].Add(stats);
+  stats_[config::kNumLevels].AddMore(stats);  // xp
+  stats_[compact->compaction->level() + 1].AddReason(
+      stats, compact->compaction->GetReason());
 
   Status status;
   status = InstallCompactionResults(compact);
@@ -2231,6 +2236,18 @@ Status DBImpl::MakeRoomForWrite(bool force) {
 
 bool DBImpl::GetProperty(const Slice& property, std::string* value) {
   value->clear();
+  // xp
+  int64_t sum_micros = 0;         // total us for compaction
+  int64_t sum_bytes_read = 0;     // total bytes read for compaction
+  int64_t sum_bytes_written = 0;  // total bytes write for compactio
+  int64_t sum_compact = 0;        // total times of compact
+  int64_t sum_times_compact_reason_size = 0;
+  int64_t sum_reason_size_bytes_read = 0;
+  int64_t sum_reason_size_bytes_written = 0;
+  int64_t sum_times_compact_reason_seek = 0;
+  int64_t sum_reason_seek_bytes_read = 0;
+  int64_t sum_reason_seek_bytes_written = 0;
+  int64_t sum_time_merge_cpu_micros = 0;
 
   MutexLock l(&mutex_);
   Slice in = property;
@@ -2255,20 +2272,78 @@ bool DBImpl::GetProperty(const Slice& property, std::string* value) {
     char buf[200];
     snprintf(buf, sizeof(buf),
              "                               Compactions\n"
-             "Level  Files Size(MB) Time(sec) Read(MB) Write(MB)\n"
-             "--------------------------------------------------\n");
+             "Level  Files Size(MB) Time(sec) Read(MB) Write(MB)  Happens  "
+             "MergeCPU(sec)\n"
+             "-----------------------------------------------------------\n");
     value->append(buf);
     for (int level = 0; level < config::kNumLevels; level++) {
       int files = versions_->NumLevelFiles(level);
       if (stats_[level].micros > 0 || files > 0) {
-        snprintf(buf, sizeof(buf), "%3d %8d %8.0f %9.0f %8.0f %9.0f\n", level,
-                 files, versions_->NumLevelBytes(level) / 1048576.0,
-                 stats_[level].micros / 1e6,
-                 stats_[level].bytes_read / 1048576.0,
-                 stats_[level].bytes_written / 1048576.0);
+        snprintf(
+            buf, sizeof(buf), "%3d %8d %8.0f %9.0f %8.0f %9.0f %8ld  %8.1lf\n",
+            level, files, versions_->NumLevelBytes(level) / 1048576.0,
+            stats_[level].micros / 1e6, stats_[level].bytes_read / 1048576.0,
+            stats_[level].bytes_written / 1048576.0,
+            stats_[level + 1].times_compact,
+            stats_[level].time_merge_cpu_micros / 1e6);
         value->append(buf);
+        sum_micros += stats_[level].micros;  // xp
+        sum_bytes_read += stats_[level].bytes_read;
+        sum_bytes_written += stats_[level].bytes_written;
+        sum_compact += stats_[level + 1].times_compact;
+        sum_times_compact_reason_size +=
+            stats_[level + 1].times_compact_reason_size;
+        sum_times_compact_reason_seek +=
+            stats_[level + 1].times_compact_reason_seek;
+        sum_reason_size_bytes_read += stats_[level].reason_size_bytes_read;
+        sum_reason_size_bytes_written +=
+            stats_[level].reason_size_bytes_written;
+        sum_reason_seek_bytes_read += stats_[level].reason_seek_bytes_read;
+        sum_reason_seek_bytes_written +=
+            stats_[level].reason_seek_bytes_written;
+        sum_time_merge_cpu_micros += stats_[level].time_merge_cpu_micros;
       }
     }
+    // xp
+    snprintf(buf, sizeof(buf),
+             "-----------------------------------------------------------\n");
+    value->append(buf);
+    snprintf(buf, sizeof(buf),
+             "Size Compact                   %9.0f %9.0f %8ld\n",
+             sum_reason_size_bytes_read / 1048576.0,
+             sum_reason_size_bytes_written / 1048576.0,
+             sum_times_compact_reason_size);
+    value->append(buf);
+    snprintf(buf, sizeof(buf),
+             "Seek Compact                   %9.0f %9.0f %8ld\n",
+             sum_reason_seek_bytes_read / 1048576.0,
+             sum_reason_seek_bytes_written / 1048576.0,
+             sum_times_compact_reason_seek);
+    value->append(buf);
+    snprintf(
+        buf, sizeof(buf),
+        "SUM                   %9.0f %8.0f %9.0f %8ld  %8.1lf\n",
+        sum_micros / 1e6, sum_bytes_read / 1048576.0,
+        sum_bytes_written /
+            1048576.0,  // xp this includes flush imm_ to L0 sst, and
+                        //   this = size compact + seek compact + sizeof(L0).
+        sum_compact, sum_time_merge_cpu_micros / 1e6);
+    value->append(buf);
+    // snprintf(buf, sizeof(buf), "   Compact. times: %8ld\n",
+    //              stats_[config::kNumLevels].times_do_compact_work);
+    // value->append(buf);
+    snprintf(buf, sizeof(buf), "     Flush Imm_. #:    %8ld\n",
+             stats_[config::kNumLevels].times_flush_immtbl);
+    value->append(buf);
+    snprintf(buf, sizeof(buf), "     Memtbl full #:    %8ld\n",
+             stats_[config::kNumLevels].times_memtbl_wait_for_immtbl);
+    value->append(buf);
+    snprintf(buf, sizeof(buf), "Compact slowdown #:    %8ld\n",
+             stats_[config::kNumLevels].times_slowdown);
+    value->append(buf);
+    snprintf(buf, sizeof(buf), "    Compact stop #:    %8ld\n",
+             stats_[config::kNumLevels].times_stop);
+    value->append(buf);
     return true;
   } else if (in == "sstables") {
     *value = versions_->current()->DebugString();

@@ -325,6 +325,10 @@ public:
 // A Compaction encapsulates information about a compaction.
 class Compaction {
  public:
+ //xp
+  CompactReason GetReason();
+  //xp
+  CompactReason reason;
  bool is_seek=false;
   ~Compaction();
 

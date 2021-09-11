@@ -1296,6 +1296,7 @@ Compaction* VersionSet::PickCompaction() {
     assert(level >= 0);
     assert(level + 1 < config::kNumLevels);
     c = new Compaction(options_, level);
+    c->reason = kSize; //xp
 
     // Pick the first file that comes after compact_pointer_[level]
     for (size_t i = 0; i < current_->files_[level].size(); i++) {
@@ -1318,6 +1319,7 @@ Compaction* VersionSet::PickCompaction() {
     // fprintf(stderr,"do seek compaction\n");
     level = current_->file_to_compact_level_;
     c = new Compaction(options_, level);
+    c->reason = kSeek; //xp
     c->inputs_[0].push_back(current_->file_to_compact_);
     c->is_seek = true;
   } else {
@@ -1655,6 +1657,10 @@ void Compaction::ReleaseInputs() {
     input_version_->Unref();
     input_version_ = nullptr;
   }
+}
+//xp
+CompactReason Compaction::GetReason() {
+  return reason;
 }
 
 }  // namespace leveldb
