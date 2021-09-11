@@ -235,6 +235,8 @@ class VersionSet {
   // describes the compaction.  Caller should delete the result.
   Compaction* PickCompaction();
 
+  Compaction* PickLevelCompaction(int level);
+
   // Return a compaction object for compacting the range [begin,end] in
   // the specified level.  Returns nullptr if there is nothing in that
   // level that overlaps the specified range.  Caller should delete
@@ -323,6 +325,7 @@ public:
 // A Compaction encapsulates information about a compaction.
 class Compaction {
  public:
+ bool is_seek=false;
   ~Compaction();
 
   // Return the level that is being compacted.  Inputs from "level"

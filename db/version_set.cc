@@ -4,17 +4,17 @@
 
 #include "db/version_set.h"
 
-#include <stdio.h>
-
-#include <algorithm>
-
 #include "db/filename.h"
 #include "db/log_reader.h"
 #include "db/log_writer.h"
 #include "db/memtable.h"
 #include "db/table_cache.h"
+#include <algorithm>
+#include <stdio.h>
+
 #include "leveldb/env.h"
 #include "leveldb/table_builder.h"
+
 #include "table/merger.h"
 #include "table/two_level_iterator.h"
 #include "util/coding.h"
@@ -29,7 +29,7 @@ static size_t TargetFileSize(const Options* options) {
 // Maximum bytes of overlaps in grandparent (i.e., level+2) before we
 // stop building a single file in a level->level+1 compaction.
 static int64_t MaxGrandParentOverlapBytes(const Options* options) {
-  return 10 * TargetFileSize(options);
+  return 15 * TargetFileSize(options);
 }
 
 // Maximum number of bytes in all compacted files.  We avoid expanding
@@ -842,7 +842,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
 
   // Unlock during expensive MANIFEST log write
   {
-    //mu->Unlock();
+    //  mu->Unlock();
 
     // Write new record to MANIFEST log
     if (s.ok()) {
@@ -863,7 +863,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
       s = SetCurrentFile(env_, dbname_, manifest_file_number_);
     }
 
-    //mu->Lock();
+    //  mu->Lock();
   }
 
   // Install the new version
@@ -1254,7 +1254,7 @@ Iterator* VersionSet::MakeInputIterator(Compaction* c) {
   int num = 0;
   for (int which = 0; which < 2; which++) {
     if (!c->inputs_[which].empty()) {
-      if (c->level() + which == 0) { // level 0 层
+      if (c->level() + which == 0) {  // level 0 层
         const std::vector<FileMetaData*>& files = c->inputs_[which];
         for (size_t i = 0; i < files.size(); i++) {
           // 这个就是一个读 *单独SST* 文件的迭代器，比较容易理解
@@ -1282,9 +1282,10 @@ Compaction* VersionSet::PickCompaction() {
   Compaction* c;
   int level;
 
-  // 这里说的意思是 一层中数据过多可以出发compaction，同时seek过多也可以出发compaction
-  // We prefer compactions triggered by too much data in a level over
-  // the compactions triggered by seeks.
+  // 这里说的意思是
+  // 一层中数据过多可以出发compaction，同时seek过多也可以出发compaction We
+  // prefer compactions triggered by too much data in a level over the
+  // compactions triggered by seeks.
   const bool size_compaction = (current_->compaction_score_ >= 1);
   const bool seek_compaction = (current_->file_to_compact_ != nullptr);
 
@@ -1305,10 +1306,12 @@ Compaction* VersionSet::PickCompaction() {
         break;
       }
     }
-    if (c->inputs_[0].empty()) { // 如果没有找到合适的，那么直接选取第一个作为compaction的文件
+    if (c->inputs_[0]
+            .empty()) {  // 如果没有找到合适的，那么直接选取第一个作为compaction的文件
       // Wrap-around to the beginning of the key space
       c->inputs_[0].push_back(current_->files_[level][0]);
     }
+    c->is_seek = false;
   }
   // 由Seek过多引起的compaction, 直接就是file_to_compact_
   else if (seek_compaction) {
@@ -1316,6 +1319,7 @@ Compaction* VersionSet::PickCompaction() {
     level = current_->file_to_compact_level_;
     c = new Compaction(options_, level);
     c->inputs_[0].push_back(current_->file_to_compact_);
+    c->is_seek = true;
   } else {
     return nullptr;
   }
@@ -1337,6 +1341,47 @@ Compaction* VersionSet::PickCompaction() {
 
   // 后面会补充： 1. level层边界的文件 2. level层与inputs_[1]中有重叠的
   SetupOtherInputs(c);
+
+  // if (c->inputs_[0].size() + c->inputs_[1].size() > 95) {
+  //   return PickLevelCompaction(level + 1);
+  // }
+
+  return c;
+}
+
+Compaction* VersionSet::PickLevelCompaction(int level) {
+  if (level == config::kNumLevels) {
+    return nullptr;
+  }
+  Compaction* c;
+  c = new Compaction(options_, level);
+  for (size_t i = 0; i < current_->files_[level].size(); i++) {
+    FileMetaData* f = current_->files_[level][i];
+    if (compact_pointer_[level].empty() ||
+        icmp_.Compare(f->largest.Encode(), compact_pointer_[level]) > 0) {
+      c->inputs_[0].push_back(f);
+      break;
+    }
+  }
+  if (c->inputs_[0].empty()) {
+    if(current_->files_[level].empty())
+    {
+      return nullptr;
+    }
+    c->inputs_[0].push_back(current_->files_[level][0]);
+  }
+  c->input_version_ = current_;
+  c->input_version_->Ref();
+  if (level == 0) {
+    InternalKey smallest, largest;
+    GetRange(c->inputs_[0], &smallest, &largest);
+    current_->GetOverlappingInputs(0, &smallest, &largest, &c->inputs_[0]);
+    assert(!c->inputs_[0].empty());
+  }
+  SetupOtherInputs(c);
+  if (c->inputs_[0].size() + c->inputs_[1].size() > 95) {
+    return PickLevelCompaction(level + 1);
+  }
 
   return c;
 }
@@ -1598,7 +1643,7 @@ bool Compaction::ShouldStopBefore(const Slice& internal_key) {
   if (overlapped_bytes_ > MaxGrandParentOverlapBytes(vset->options_)) {
     // Too much overlap for current output; start new output
     overlapped_bytes_ = 0;
-	//printf("Should Stop\n");
+    // printf("Should Stop\n");
     return true;
   } else {
     return false;
