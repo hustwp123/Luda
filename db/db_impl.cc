@@ -312,6 +312,12 @@ DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
 DBImpl::~DBImpl() {
   // Wait for background work to finish.
   mutex_.Lock();
+  fprintf(stderr,"get_lock_time=%ld\n",get_lock_time);
+  fprintf(stderr,"get_meme_time=%ld\n",get_mem_time);
+  fprintf(stderr,"get_imem_time=%ld\n",get_imem_time);
+  fprintf(stderr,"get_file_time=%ld\n",get_file_time);
+  fprintf(stderr,"get_mem_num=%ld\n",get_mem_num);
+  fprintf(stderr,"get_imem_num=%ld\n",get_imem_num);
   shutting_down_.store(true, std::memory_order_release);
   while (background_compaction_scheduled_) {
     background_work_finished_signal_.Wait();
@@ -937,8 +943,10 @@ void DBImpl::BackgroundCompaction() {
     CompactionState* compact = new CompactionState(c);
     // status = DoCompactionWork2(compact);
     if (c->is_seek) {
+      //fprintf(stderr,"seek compaction level %d\n",c->level());
       status = DoCompactionWork2(compact);
     } else {
+      //status = DoCompactionWork2(compact);
       status = DoCompactionWork(compact, c->is_seek);
     }
 
@@ -1067,7 +1075,7 @@ Status DBImpl::FinishCompactionOutputFile(CompactionState* compact,
   return s;
 }
 
-Status DBImpl::InstallCompactionResults(CompactionState* compact) {
+Status DBImpl::InstallCompactionResults(CompactionState* compact,bool is_seek) {
   mutex_.AssertHeld();
   Log(options_.info_log, "Compacted %d@%d + %d@%d files => %lld bytes",
       compact->compaction->num_input_files(0), compact->compaction->level(),
@@ -1081,7 +1089,12 @@ Status DBImpl::InstallCompactionResults(CompactionState* compact) {
     const CompactionState::Output& out = compact->outputs[i];
     compact->compaction->edit()->AddFile(level + 1, out.number, out.file_size,
                                          out.smallest, out.largest);
+    // if(is_seek)
+    // {
+    //   fprintf(stderr,"file size==%d\n",out.file_size);
+    // }
   }
+  
   return versions_->LogAndApply(compact->compaction->edit(), &mutex_);
 }
 
@@ -1175,10 +1188,8 @@ Status DBImpl::DoCompactionWork2(CompactionState* compact) {
         // Hidden by an newer entry for same user key
         drop = true;  // (A)
       } else if (ikey.type == kTypeDeletion &&
-                 ikey.sequence <= compact->smallest_snapshot &&
-                 // 这个BaseLevelForKey()就是说这个deletion的Key前面levelf +
-                 // 2没有与之相关的Key了，可以安全删除了
-                 compact->compaction->IsBaseLevelForKey(ikey.user_key)) {
+                 ikey.sequence <= compact->smallest_snapshot
+                 &&compact->compaction->IsBaseLevelForKey(ikey.user_key)) {
         // For this user key:
         // (1) there is no data in higher levels
         // (2) data in lower levels will have larger sequence numbers
@@ -1264,7 +1275,7 @@ Status DBImpl::DoCompactionWork2(CompactionState* compact) {
       stats, compact->compaction->GetReason());
 
   if (status.ok()) {
-    status = InstallCompactionResults(compact);
+    status = InstallCompactionResults(compact,true);
   }
   if (!status.ok()) {
     RecordBackgroundError(status);
@@ -1959,8 +1970,10 @@ int64_t DBImpl::TEST_MaxNextLevelOverlappingBytes() {
 
 Status DBImpl::Get(const ReadOptions& options, const Slice& key,
                    std::string* value) {
+  uint64_t start = env_->NowMicros();
   Status s;
   MutexLock l(&mutex_);
+  get_lock_time+=env_->NowMicros()-start;
   SequenceNumber snapshot;
   if (options.snapshot != nullptr) {
     snapshot =
@@ -1984,15 +1997,24 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
     mutex_.Unlock();
     // First look in the memtable, then in the immutable memtable (if any).
     LookupKey lkey(key, snapshot);
+    uint64_t time1 = env_->NowMicros();
     if (mem->Get(lkey, value, &s)) {  // mem Get
+      get_mem_time+=env_->NowMicros()-time1;
+      get_mem_num++;
       // Done
     } else if (imm != nullptr && imm->Get(lkey, value, &s)) {  // Imm Get
       // Done
+      get_imem_time+=env_->NowMicros()-time1;
+      get_imem_num++;
     } else {  // SST get
+    uint64_t time3 = env_->NowMicros();
       s = current->Get(options, lkey, value, &stats);
+      get_file_time+=env_->NowMicros()-time3;
       have_stat_update = true;
     }
+    uint64_t start2 = env_->NowMicros();
     mutex_.Lock();
+    get_lock_time+=env_->NowMicros()-start2;
   }
 
   if (have_stat_update && current->UpdateStats(stats)) {

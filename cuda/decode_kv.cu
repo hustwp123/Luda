@@ -882,7 +882,8 @@ void SSTSort::WpSort() {
     uint8_t itype = inum & 0xff;
     if (last_seq <= seq_) {
       drop = true;
-    } else if (itype == kTypeDeletion && iseq <= seq_) {
+    } else if (itype == kTypeDeletion && iseq <= seq_){
+   // && compact->compaction->IsBaseLevelForKey(ikey.user_key)) {
       drop = true;
     }
     last_seq = iseq;

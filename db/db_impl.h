@@ -30,6 +30,12 @@ class VersionSet;
 
 class DBImpl : public DB {
  public:
+ uint64_t get_lock_time=0;
+ uint64_t get_mem_time=0;
+ uint64_t get_imem_time=0;
+ uint64_t get_file_time=0;
+ uint64_t get_mem_num=0;
+ uint64_t get_imem_num=0;
   DBImpl(const Options& options, const std::string& dbname);
 
   DBImpl(const DBImpl&) = delete;
@@ -221,7 +227,7 @@ public:
 
   Status OpenCompactionOutputFile(CompactionState* compact);
   Status FinishCompactionOutputFile(CompactionState* compact, Iterator* input);
-  Status InstallCompactionResults(CompactionState* compact)
+  Status InstallCompactionResults(CompactionState* compact,bool is_seek=false)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   const Comparator* user_comparator() const {
