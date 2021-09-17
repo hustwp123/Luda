@@ -26,10 +26,12 @@ static const int kNumLevels = 7;
 static const int kL0_CompactionTrigger = 4;
 
 // Soft limit on number of level-0 files.  We slow down writes at this point.
-static const int kL0_SlowdownWritesTrigger = 8;
+//static const int kL0_SlowdownWritesTrigger = 20;
+static const int kL0_SlowdownWritesTrigger = 36;//xp
 
 // Maximum number of level-0 files.  We stop writes at this point.
-static const int kL0_StopWritesTrigger = 12;
+//static const int kL0_StopWritesTrigger = 24;
+static const int kL0_StopWritesTrigger = 40; //xp
 
 // Maximum level to which a new compacted memtable is pushed if it
 // does not create overlap.  We try to push to level 2 to avoid the
@@ -43,8 +45,6 @@ static const int kMaxMemCompactLevel = 2;
 static const int kReadBytesPeriod = 1048576;
 
 }  // namespace config
-
-enum CompactReason {kNull = 0x0, kSize = 0x1, kSeek = 0x2}; //xp
 
 class InternalKey;
 

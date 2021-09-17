@@ -56,7 +56,8 @@ struct LEVELDB_EXPORT Options {
   // errors.  This may have unforeseen ramifications: for example, a
   // corruption of one DB entry may cause a large number of entries to
   // become unreadable or for the entire DB to become unopenable.
-  bool paranoid_checks = false;
+  //bool paranoid_checks = false;
+  bool paranoid_checks = true; //xp
 
   // Use the specified object to interact with the environment,
   // e.g. to read/write files, schedule background work, etc.
@@ -148,7 +149,8 @@ struct LEVELDB_EXPORT ReadOptions {
 
   // If true, all data read from underlying storage will be
   // verified against corresponding checksums.
-  bool verify_checksums = false;
+  //bool verify_checksums = false;
+  bool verify_checksums = true; //xp
 
   // Should the data read for this iteration be cached in memory?
   // Callers may wish to set this field to false for bulk scans.

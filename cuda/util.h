@@ -18,7 +18,7 @@ void EncodeFixed32(char *dst, uint32_t value);
 
 void EncodeFixed64(char *dst, uint64_t value);
 
-//  void PutFixed32(Buffer *dst, uint32_t value);
+void PutFixed32(Buffer *dst, uint32_t value);
 
 void PutFixed64(Buffer *dst, uint64_t value);
 

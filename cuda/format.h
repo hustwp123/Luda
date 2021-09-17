@@ -14,36 +14,24 @@ namespace leveldb {
 namespace gpu {
 
 void BlockHandle::EncodeTo(Buffer* dst) {
-    bool tmpb = (offset_ && size_);
-    if(!tmpb) {
-      fprintf(stderr, "ERROR! %s:%d:%s\n", __FILE__, __LINE__, __func__);
-      int* purpose_crash = NULL; *purpose_crash = 1;
-    }
+    assert(offset_ && size_);
     PutVarint64(dst, offset_);
     PutVarint64(dst, size_);
 }
 
      
 bool BlockHandle::DecodeFrom(Slice *input) {
-    bool tmpb = GetVarint64(input, &offset_);
-    if(!tmpb) {
-      fprintf(stderr, "ERROR! %s:%d:%s\n", __FILE__, __LINE__, __func__);
-      int* purpose_crash = NULL; *purpose_crash = 1;
-    }
-    tmpb = (GetVarint64(input, &size_));
-    if(!tmpb) {
-      fprintf(stderr, "ERROR! %s:%d:%s\n", __FILE__, __LINE__, __func__);
-      int* purpose_crash = NULL; *purpose_crash = 1;
-    }
+    //assert(GetVarint64(input, &offset_));
+    //assert(GetVarint64(input, &size_));
+    GetVarint64(input, &offset_);
+    GetVarint64(input, &size_);
     return true;
 }
 
+
+
 void Footer::EncodeTo(Buffer *dst) {
-    bool tmpb = (dst->total_ == leveldb::Footer::kEncodedLength); // 20 + 20 + 8 = 48
-    if(!tmpb) {
-      fprintf(stderr, "ERROR! %s:%d:%s\n", __FILE__, __LINE__, __func__);
-      int* purpose_crash = NULL; *purpose_crash = 1;
-    }
+    assert(dst->total_ == leveldb::Footer::kEncodedLength); // 20 + 20 + 8 = 48
     metaindex_handle_.EncodeTo(dst);
     index_handle_.EncodeTo(dst);
 
@@ -63,18 +51,10 @@ bool Footer::DecodeFrom(Slice *input) {
         return false;
     }
 
-    bool tmpb = (metaindex_handle_.DecodeFrom(input));
-    if(!tmpb) {
-      fprintf(stderr, "ERROR! %s:%d:%s\n", __FILE__, __LINE__, __func__);
-      int* purpose_crash = NULL; *purpose_crash = 1;
-    }
-    tmpb = (index_handle_.DecodeFrom(input));
-    if(!tmpb) {
-      fprintf(stderr, "ERROR! %s:%d:%s\n", __FILE__, __LINE__, __func__);
-      int* purpose_crash = NULL; *purpose_crash = 1;
-    }
-    // fprintf(stderr, "XXXDBG cuda/format.h Footer::DecodeFrom() meta/idx_handle_ <off, size>: <%ld, %ld> <%ld, %ld>\n",
-    //         metaindex_handle_.offset_, metaindex_handle_.size_, index_handle_.offset_, index_handle_.size_);
+    metaindex_handle_.DecodeFrom(input);
+    index_handle_.DecodeFrom(input);
+    // assert();
+    // assert();
 
     return true;
 }
