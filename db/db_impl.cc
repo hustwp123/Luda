@@ -2184,6 +2184,7 @@ bool DBImpl::GetProperty(const Slice& property, std::string* value) {
     snprintf(buf, sizeof(buf), "   Write file (us):    %8ld, %4.1f\n", 
                   tmp_sum_kWrite, (double) 100*tmp_sum_kWrite/sum_iostat_);
     value->append(buf);
+    return true;
   } else if (in == "sstables") {
     *value = versions_->current()->DebugString();
     return true;
