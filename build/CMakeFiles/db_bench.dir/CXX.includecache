@@ -150,16 +150,6 @@ port/thread_annotations.h
 stdint.h
 -
 
-../util/testharness.h
-stdio.h
--
-stdlib.h
--
-sstream
--
-leveldb/status.h
-../util/leveldb/status.h
-
 ../util/testutil.h
 helpers/memenv/memenv.h
 ../util/helpers/memenv/memenv.h
@@ -209,28 +199,6 @@ stdio.h
 -
 port/port.h
 /home/wp/LevelDB-CUDA/util/port/port.h
-
-/home/wp/LevelDB-CUDA/util/testharness.cc
-util/testharness.h
-/home/wp/LevelDB-CUDA/util/util/testharness.h
-stdlib.h
--
-sys/stat.h
--
-sys/types.h
--
-string
--
-vector
--
-leveldb/env.h
-/home/wp/LevelDB-CUDA/util/leveldb/env.h
-
-/home/wp/LevelDB-CUDA/util/testutil.cc
-util/testutil.h
-/home/wp/LevelDB-CUDA/util/util/testutil.h
-util/random.h
-/home/wp/LevelDB-CUDA/util/util/random.h
 
 include/port/port_config.h
 

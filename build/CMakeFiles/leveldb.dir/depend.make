@@ -266,6 +266,7 @@ CMakeFiles/leveldb.dir/db/repair.cc.o: ../port/thread_annotations.h
 CMakeFiles/leveldb.dir/db/repair.cc.o: ../util/arena.h
 CMakeFiles/leveldb.dir/db/repair.cc.o: ../util/coding.h
 CMakeFiles/leveldb.dir/db/repair.cc.o: ../util/logging.h
+CMakeFiles/leveldb.dir/db/repair.cc.o: ../util/mutexlock.h
 CMakeFiles/leveldb.dir/db/repair.cc.o: ../util/random.h
 CMakeFiles/leveldb.dir/db/repair.cc.o: ../db/repair.cc
 CMakeFiles/leveldb.dir/db/repair.cc.o: include/port/port_config.h

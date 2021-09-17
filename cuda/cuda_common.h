@@ -11,6 +11,9 @@
 #include <string.h>
 #include <unordered_map>
 #include <vector>
+#include <utility>
+#include <atomic>
+#include "util/mutexlock.h"
 
 #define K_SHARED_KEYS (4)
 #define CUDA_MAX_COMPACTION_FILES (100)
@@ -232,6 +235,62 @@ struct block_meta {
   uint64_t size;    // 每个DataBlock的大小，不包括（type + CRC）
 };
 
+class H_SST_Cache{
+  public:
+  port::Mutex mutex_;
+  std::unordered_map<std::string,char*> m;
+
+  std::queue<char*> q;
+
+  char* GetHsst()
+  {
+    MutexLock l(&mutex_);
+    if(!q.empty())
+    {
+      char* temp=q.front();
+      q.pop();
+      return temp;
+    }
+    else
+    {
+      auto it=m.begin();
+      char* temp=it->second;
+      m.erase(it);
+      return temp;
+    }
+  }
+  char* FindHsst(std::string fname,bool isCompact)
+  {
+    MutexLock l(&mutex_);
+    auto it=m.find(fname);
+    if(it!=m.end())
+    {
+      char* temp= it->second;
+      if(isCompact)
+      {
+        m.erase(it);
+      }
+      return temp;
+    }
+    return nullptr;
+  }
+  void PutHsst(std::string fname,char* h_sst_)
+  {
+    MutexLock l(&mutex_);
+    m[fname]=h_sst_;
+  }
+  void EraseHsst(std::string fname)
+  {
+    MutexLock l(&mutex_);
+    auto it=m.find(fname);
+    if(it!=m.end())
+    {
+      q.push(it->second);
+      m.erase(it);
+    }
+  }
+};
+
 // 统一负责主机与设备的内存的申请与释放
 // 大致内存最多等于 SST_SIZE * 25 / SST_SIZE * 25 * 2
 class HostAndDeviceMemory {
@@ -296,6 +355,7 @@ class HostAndDeviceMemory {
   int high_size;
   WpSlice* resultSlice;
   int result_size;
+  H_SST_Cache cache;
 };
 
 class SSTDecode {
@@ -310,6 +370,7 @@ class SSTDecode {
     assert(n == file_size_);
     ::fclose(file);
   }
+
 
   void SetMemory(int idx, HostAndDeviceMemory* m) {
     d_SST_ptr_ = m->d_SST_ptr;
@@ -341,6 +402,7 @@ class SSTDecode {
   bool FindInMem(std::string fname, HostAndDeviceMemory* m) {
     auto it = m->l0_hkv.find(fname);
     auto it2 = m->l0_knum.find(fname);
+    
     if (it == m->l0_hkv.end()) {
       return false;
     }
@@ -515,9 +577,8 @@ class SSTEncode {
 
   void SetMemory(HostAndDeviceMemory* m, int base, bool isFlush = false) {
     base_ = base;
-    if(SST_idx_>=CUDA_MAX_COMPACTION_FILES)
-    {
-      fprintf(stderr,"SST_idx==%d  errrrrrrrrrrrrrrrrrrr\n",SST_idx_);
+    if (SST_idx_ >= CUDA_MAX_COMPACTION_FILES) {
+      fprintf(stderr, "SST_idx==%d  errrrrrrrrrrrrrrrrrrr\n", SST_idx_);
     }
 
     if (!isFlush) {
@@ -565,6 +626,9 @@ class SSTEncode {
   void WriteIndexAndFooter();  // 填写剩下的部分
 
   void DoEncode();
+
+  int WriteFile(std::string fname);
+  int WriteFile2(std::string fname);
 
   // AsyncEncode
   void DoEncode_1(bool f = false);

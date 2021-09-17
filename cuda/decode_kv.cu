@@ -15,6 +15,21 @@
 #include "cuda/util.cu"
 #include "cuda/util.h"
 
+#include <fcntl.h>
+#include <assert.h>
+#include <unistd.h>
+
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+
+#include <cuda_runtime.h>
+
+//include this header file
+#include "cufile.h"
+
+#include "/usr/local/cuda/gds/samples/cufile_sample_utils.h"
+
 #define M (512 * (__SST_SIZE / (1024 * 1024 * 4)))
 #define N (32)
 using namespace mgpu;
@@ -73,6 +88,9 @@ __host__ HostAndDeviceMemory::HostAndDeviceMemory() {
     cudaMalloc((void**)&pd_so, sizeof(uint32_t) * CUDA_MAX_GDI_PER_SST);
     cudaMalloc((void**)&pd_fm, sizeof(filter_meta) * CUDA_MAX_GDI_PER_SST);
     assert(pd_SST && pd_gdi && pd_skv && pd_shared_size && pd_so);
+
+
+    cache.q.push(ph_SST);
 
     h_SST.push_back(ph_SST);
     h_gdi.push_back(ph_gdi);
@@ -1204,7 +1222,7 @@ __host__ void SSTEncode::DoEncode() {
                   cudaMemcpyHostToDevice, s2);
   GPUEncodeFilter<<<M, N, 0, s2>>>(d_SST_new_, d_skv_, d_fmeta_,
                                    datablock_count_, k, 0);
-
+  
   cudaMemcpyAsync(h_SST_, d_SST_new_, data_blocks_size, cudaMemcpyDeviceToHost,
                   s1);
   cudaMemcpyAsync(
@@ -1228,6 +1246,86 @@ __host__ void SSTEncode::DoEncode() {
   cudaStreamDestroy(s1);
   cudaStreamDestroy(s2);
 }
+
+__host__ int SSTEncode::WriteFile(std::string fname)
+{
+  int fd = -1;
+	int idx = -1;
+	ssize_t ret = -1;
+	void *devPtr = (void*)d_SST_new_;;
+	const size_t size = cur_;
+	CUfileError_t status;
+	CUfileDescr_t cf_descr;
+	CUfileHandle_t cf_handle;
+	const char *TESTFILE;
+        TESTFILE = fname.c_str();
+	check_cudaruntimecall(cudaSetDevice(0));
+        // opens a file to write
+        ret = open(TESTFILE, O_CREAT | O_RDWR | O_DIRECT, 0664);
+        fd = ret;
+        memset((void *)&cf_descr, 0, sizeof(CUfileDescr_t));
+        cf_descr.handle.fd = fd;
+        cf_descr.type = CU_FILE_HANDLE_TYPE_OPAQUE_FD;
+        status = cuFileHandleRegister(&cf_handle, &cf_descr);
+	check_cudaruntimecall(cudaGetDevice(&idx));
+	check_cudaruntimecall(cudaGetDevice(&idx));
+	// writes device memory contents to a file
+	// Not we skipped device memory registration using cuFileBufRegister
+	ret = cuFileWrite(cf_handle, devPtr, size, 0, 0);
+        cuFileHandleDeregister(cf_handle);
+        close(fd);
+	return ret;
+}
+__host__ int SSTEncode::WriteFile2(std::string fname)
+{
+  int fd = -1;
+	ssize_t ret = -1;
+	void *devPtr = (void*)d_SST_new_;
+	const size_t size = cur_;
+	CUfileError_t status;
+	const char *TESTFILE;
+	CUfileDescr_t cf_descr;
+  CUfileHandle_t cf_handle;
+  TESTFILE = fname.c_str();
+	check_cudaruntimecall(cudaSetDevice(0));
+  status = cuFileDriverOpen();
+
+	// opens a file to write
+	ret = open(TESTFILE, O_CREAT | O_RDWR | O_DIRECT, 0664);
+	fd = ret;
+	memset((void *)&cf_descr, 0, sizeof(CUfileDescr_t));
+	cf_descr.handle.fd = fd;
+	cf_descr.type = CU_FILE_HANDLE_TYPE_OPAQUE_FD;
+	status = cuFileHandleRegister(&cf_handle, &cf_descr);
+	if (status.err != CU_FILE_SUCCESS) {
+		std::cerr << "file register error:"
+			<< cuFileGetErrorString(status) << std::endl;
+		close(fd);
+		fd = -1;
+		goto out1;
+	}
+
+	// registers device memory
+	status = cuFileBufRegister(devPtr, size, 0);
+
+	// writes device memory contents to a file
+	ret = cuFileWrite(cf_handle, devPtr, size, 0, 0);
+
+	// deregister the device memory
+	status = cuFileBufDeregister(devPtr);
+
+out2:
+	//check_cudaruntimecall(cudaFree(devPtr));
+out1:
+	// close file
+	if (fd > 0) {
+		cuFileHandleDeregister(cf_handle);
+		close(fd);
+	}
+	status = cuFileDriverClose();
+	return ret;
+}
+
 
 __host__ void SSTEncode::DoEncode_1(bool f) {
   // assert(0);
@@ -1287,6 +1385,7 @@ __host__ void SSTEncode::DoEncode_4() {
   cudaStream_t s1 = (cudaStream_t)s1_.data();
   cudaStream_t s2 = (cudaStream_t)s2_.data();
 
+// fprintf(stderr,"cur==%d  data_blocks_size==%d filter_handle_.offset_=%d\n",cur_,data_blocks_size_,filter_handle_.offset_);
   cudaMemcpyAsync(h_SST_, d_SST_new_, data_blocks_size_, cudaMemcpyDeviceToHost,
                   s1);
   cudaMemcpyAsync(
@@ -1304,6 +1403,9 @@ __host__ void SSTEncode::DoEncode_4() {
     memcpy(h_SST_ + filter_handle_.offset_ + filter_handle_.size_ + 1, &result,
            4);
   }
+  //cudaMemcpyAsync(d_SST_new_,h_SST_,cur_,cudaMemcpyHostToDevice);
+
+  cudaMemcpyAsync(d_SST_new_+data_blocks_size_,h_SST_+data_blocks_size_,cur_-data_blocks_size_,cudaMemcpyHostToDevice,s1);
 
   s1_.Sync();
   s2_.Sync();

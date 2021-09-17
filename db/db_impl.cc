@@ -56,10 +56,12 @@ void* thread_write_file(void* arg) {
   write_file* pf = (write_file*)arg;
   gpu::SSTEncode* pencode = pf->encode;
 
-  FILE* file = ::fopen(pf->name.data(), "wb");
-  ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
-  ::fsync(fileno(file));
-  ::fclose(file);
+  pencode->WriteFile(pf->name);
+
+  // FILE* file = ::fopen(pf->name.data(), "wb");
+  // ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
+  // ::fsync(fileno(file));
+  // ::fclose(file);
 
   delete pencode;
 }
@@ -110,6 +112,8 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
 
   int sst_id = CUDA_MAX_COMPACTION_FILES - 1;
   // int ssd_id=0;
+
+  //char * hsst=m_.cache.GetHsst();
 
   std::string fname = TableFileName(dbname, meta->number);
   if (iter->Valid()) {
@@ -169,9 +173,10 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
 
     // Finish and check for builder errors
     meta->file_size = encode.cur_;
-    FILE* f = ::fopen(fname.data(), "wb");
-    ::fwrite(encode.h_SST_, 1, encode.cur_, f);
-    ::fclose(f);
+    encode.WriteFile(fname);
+    // FILE* f = ::fopen(fname.data(), "wb");
+    // ::fwrite(encode.h_SST_, 1, encode.cur_, f);
+    // ::fclose(f);
 
     // Finish and check for file errors
     if (true) {
@@ -181,6 +186,7 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
       s = it->status();
       delete it;
     }
+    
   }
 
   gpu_write_l0_.store(false, std::memory_order_release);
@@ -1558,8 +1564,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact, bool isSeek) {
     gpu::SSTDecode* p;
     p = new gpu::SSTDecode(filename.data(), low->file_size, m_.h_SST[sst_idx],
                            filename);
-    p->SetMemory(sst_idx++, &m_);
-
+      p->SetMemory(sst_idx++, &m_);
     if (!useWP) {
       p->FindInMem(filename, &m_);
     }
@@ -1596,10 +1601,16 @@ Status DBImpl::DoCompactionWork(CompactionState* compact, bool isSeek) {
   if (!useWP) {
     for (auto& p : low_decode) {
       if (!p->inMem)
+      {
         p->DoDecode();
+      }
       else
+      {
         p->Copy();
+      }
+        
     }
+     
     for (auto& p : high_decode) {
       p->DoDecode();
     }
@@ -1715,23 +1726,10 @@ Status DBImpl::DoCompactionWork(CompactionState* compact, bool isSeek) {
 
     Slice key(sort.out_[i].ikey, sort.out_[i].key_size);
     bool f = compact->compaction->ShouldStopBefore(key);
-    // if(f)
-    // {
-    //   fprintf(stderr,"f==%d\n",f);
-    // }
-
-    // if(file_size >= compact->compaction->MaxOutputFileSize())
-    // {
-    //   fprintf(stderr,"file_size=%d
-    //   compact->compaction->MaxOutputFileSize()=%d\n",file_size,compact->compaction->MaxOutputFileSize());
-    // }
     if ((f) || keys >= keys_per_SST ||
         file_size >= compact->compaction->MaxOutputFileSize() ||
         file_size >= (15 * 1024 * 1024)) {
-      // fprintf(stderr,"file_size=%d\n",file_size);
       SST_kv_cnts.push_back(keys);
-      // all_file_size+=file_size;
-      ////printf(" [%d] ", keys);
       keys = 0;
       file_size = 0;
     }
@@ -1806,10 +1804,11 @@ Status DBImpl::DoCompactionWork(CompactionState* compact, bool isSeek) {
       mutex_.Unlock();
       compact->total_bytes += out.file_size;
       std::string name = TableFileName(dbname_, out.number);
-      FILE* file = ::fopen(name.data(), "wb");
-      ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
-      ::fsync(fileno(file));
-      ::fclose(file);
+      pencode->WriteFile(name);
+      // FILE* file = ::fopen(name.data(), "wb");
+      // ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
+      // ::fsync(fileno(file));
+      // ::fclose(file);
       delete pencode;
       last_keys -= kv_cnt;
     }
@@ -1862,10 +1861,12 @@ Status DBImpl::DoCompactionWork(CompactionState* compact, bool isSeek) {
       mutex_.Unlock();
       compact->total_bytes += out.file_size;
       std::string name = TableFileName(dbname_, out.number);
-      FILE* file = ::fopen(name.data(), "wb");
-      ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
-      ::fsync(fileno(file));
-      ::fclose(file);
+      pencode->WriteFile(name);
+
+      // FILE* file = ::fopen(name.data(), "wb");
+      // ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
+      // ::fsync(fileno(file));
+      // ::fclose(file);
       delete pencode;
       last_keys -= kv_cnt;
     }
