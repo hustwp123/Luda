@@ -1405,7 +1405,7 @@ __host__ void SSTEncode::DoEncode_4() {
   }
   //cudaMemcpyAsync(d_SST_new_,h_SST_,cur_,cudaMemcpyHostToDevice);
 
-  cudaMemcpyAsync(d_SST_new_+data_blocks_size_,h_SST_+data_blocks_size_,cur_-data_blocks_size_,cudaMemcpyHostToDevice,s1);
+  //cudaMemcpyAsync(d_SST_new_+data_blocks_size_,h_SST_+data_blocks_size_,cur_-data_blocks_size_,cudaMemcpyHostToDevice,s1);
 
   s1_.Sync();
   s2_.Sync();

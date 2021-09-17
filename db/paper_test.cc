@@ -309,7 +309,7 @@ void test_full_CPU_GPU(const char *f, uint64_t size) {
 
     // 1. Decode
     START(ts);
-    leveldb::gpu::SSTDecode SST(filename, filesize, m.h_SST[0],std::string(f));
+    leveldb::gpu::SSTDecode SST(filename, filesize, m.h_SST[0],std::string(f),&m);
     SST.SetMemory(0, &m);
     SST.DoDecode();
     SST.DoGPUDecode();

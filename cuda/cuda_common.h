@@ -270,6 +270,7 @@ class H_SST_Cache{
       {
         m.erase(it);
       }
+      //fprintf(stderr,"find\n");
       return temp;
     }
     return nullptr;
@@ -360,16 +361,41 @@ class HostAndDeviceMemory {
 
 class SSTDecode {
  public:
-  SSTDecode(const char* filename, int filesize, char* SST, std::string fname)
-      : all_kv_(0), shared_cnt_(0), h_SST_(SST), file_size_(filesize) {
+ HostAndDeviceMemory* mt;
+ ~SSTDecode()
+ {
+   mt->cache.q.push(h_SST_);
+ }
+  SSTDecode(const char* filename, int filesize, char* SST, std::string fname,HostAndDeviceMemory* m)
+      : all_kv_(0), shared_cnt_(0), file_size_(filesize) {
     // TODO: open file and read it to h_SST_
     inMem = false;
-    FILE* file = ::fopen(filename, "rb");
-    assert(file);
-    size_t n = ::fread(h_SST_, sizeof(char), file_size_, file);
-    assert(n == file_size_);
-    ::fclose(file);
+    mt=m;
+    // h_SST_=SST;
+    
+    // FILE* file = ::fopen(filename, "rb");
+    //   assert(file);
+    //   size_t n = ::fread(h_SST_, sizeof(char), file_size_, file);
+    //   assert(n == file_size_);
+    //   ::fclose(file);
+
+    char* hsst=m->cache.FindHsst(fname,true);
+    if(hsst)
+    {
+      h_SST_=hsst;
+    }
+    else
+    {
+      h_SST_=m->cache.GetHsst();
+      FILE* file = ::fopen(filename, "rb");
+      assert(file);
+      size_t n = ::fread(h_SST_, sizeof(char), file_size_, file);
+      assert(n == file_size_);
+      ::fclose(file);
+    }
   }
+
+
 
 
   void SetMemory(int idx, HostAndDeviceMemory* m) {
@@ -386,7 +412,6 @@ class SSTDecode {
     d_gdi_ = m->d_gdi[idx];
   }
 
-  ~SSTDecode() = default;
   void DoDecode();
   void DoGPUDecode();
 

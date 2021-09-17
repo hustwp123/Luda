@@ -50,18 +50,21 @@ const int kNumNonTableCacheFiles = 10;
 struct write_file {
   std::string name;
   gpu::SSTEncode* encode;
+  gpu::HostAndDeviceMemory* mt;
 };
 
 void* thread_write_file(void* arg) {
   write_file* pf = (write_file*)arg;
   gpu::SSTEncode* pencode = pf->encode;
 
-  pencode->WriteFile(pf->name);
+  // /pencode->WriteFile(pf->name);
 
-  // FILE* file = ::fopen(pf->name.data(), "wb");
-  // ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
-  // ::fsync(fileno(file));
-  // ::fclose(file);
+  FILE* file = ::fopen(pf->name.data(), "wb");
+  ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
+  ::fsync(fileno(file));
+  ::fclose(file);
+
+  pf->mt->cache.PutHsst(pf->name,pencode->h_SST_);
 
   delete pencode;
 }
@@ -113,13 +116,15 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
   int sst_id = CUDA_MAX_COMPACTION_FILES - 1;
   // int ssd_id=0;
 
-  //char * hsst=m_.cache.GetHsst();
+  char * hsst=m_.cache.GetHsst();
 
+  //char * hsst=m_.h_SST[sst_id];
   std::string fname = TableFileName(dbname, meta->number);
   if (iter->Valid()) {
     int kv_cnt = 0;
     gpu::SST_kv* pskv = m_.L0_h_skv_sorted;
-    char* dst = m_.h_SST[sst_id];
+    char* dst = hsst;
+    //char* dst = hsst;
     int dst_off = 0;
 
     // Get all key-Value
@@ -147,25 +152,18 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
     }
 
     // Copy Key Value to GPU
-    ////printf("l0 %s %s cnt:%d\n", fname.data(),
-    /// meta->largest.DebugString().data(), kv_cnt);
 
-    gpu::cudaMemHtD(m_.d_SST[sst_id], m_.h_SST[sst_id], dst_off);
+    gpu::cudaMemHtD(m_.d_SST[sst_id], hsst, dst_off);
     gpu::cudaMemHtD(m_.L0_d_skv_sorted_2, m_.L0_h_skv_sorted,
                     sizeof(gpu::SST_kv) * kv_cnt);
-
-    gpu::SSTEncode encode(m_.h_SST[sst_id], kv_cnt, sst_id);
+    gpu::SSTEncode encode(hsst, kv_cnt, sst_id);
     encode.SetMemory(&m_, 0, true);
 
     encode.DoEncode_1(true);
     encode.DoEncode_2(true);
 
-    // encode.DoEncode_1();
-    // encode.DoEncode_2();
-
     encode.DoEncode_3();
     encode.DoEncode_4();
-
     gpu::SST_kv* temp = m_.getL0skv();
     gpu::cudaMemDtH(temp, encode.l0_d_skv_, sizeof(gpu::SST_kv) * kv_cnt);
     m_.l0_hkv[fname] = temp;
@@ -173,10 +171,12 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
 
     // Finish and check for builder errors
     meta->file_size = encode.cur_;
-    encode.WriteFile(fname);
-    // FILE* f = ::fopen(fname.data(), "wb");
-    // ::fwrite(encode.h_SST_, 1, encode.cur_, f);
-    // ::fclose(f);
+   // encode.WriteFile(fname);
+    FILE* f = ::fopen(fname.data(), "wb");
+    ::fwrite(encode.h_SST_, 1, encode.cur_, f);
+    ::fclose(f);
+    //m_.cache.q.push(encode.h_SST_);
+    m_.cache.PutHsst(fname,encode.h_SST_);
 
     // Finish and check for file errors
     if (true) {
@@ -1562,8 +1562,10 @@ Status DBImpl::DoCompactionWork(CompactionState* compact, bool isSeek) {
   for (auto& low : compact->compaction->inputs_[0]) {
     std::string filename = TableFileName(dbname_, low->number);
     gpu::SSTDecode* p;
-    p = new gpu::SSTDecode(filename.data(), low->file_size, m_.h_SST[sst_idx],
-                           filename);
+    // p = new gpu::SSTDecode(filename.data(), low->file_size, m_.h_SST[sst_idx],
+    //                        filename,&m_);
+    p = new gpu::SSTDecode(filename.data(), low->file_size, nullptr,
+                           filename,&m_);
       p->SetMemory(sst_idx++, &m_);
     if (!useWP) {
       p->FindInMem(filename, &m_);
@@ -1576,8 +1578,10 @@ Status DBImpl::DoCompactionWork(CompactionState* compact, bool isSeek) {
   for (auto& high : compact->compaction->inputs_[1]) {
     std::string filename = TableFileName(dbname_, high->number);
     ////printf("%s ", filename.data());
-    gpu::SSTDecode* p = new gpu::SSTDecode(filename.data(), high->file_size,
-                                           m_.h_SST[sst_idx], filename);
+    // gpu::SSTDecode* p = new gpu::SSTDecode(filename.data(), high->file_size,
+    //                                        m_.h_SST[sst_idx], filename,&m_);
+    gpu::SSTDecode* p = new gpu::SSTDecode(filename.data(), high->file_size, nullptr,
+                           filename,&m_);
     p->SetMemory(sst_idx++, &m_);
     high_decode.push_back(p);
   }
@@ -1608,9 +1612,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact, bool isSeek) {
       {
         p->Copy();
       }
-        
     }
-     
     for (auto& p : high_decode) {
       p->DoDecode();
     }
@@ -1753,7 +1755,8 @@ Status DBImpl::DoCompactionWork(CompactionState* compact, bool isSeek) {
   for (int i = 0; i < SST_kv_cnts.size(); ++i) {
     // int kv_cnt = keys_per_SST <= last_keys ? keys_per_SST : last_keys;
     int kv_cnt = SST_kv_cnts[i];
-    gpu::SSTEncode* p = new gpu::SSTEncode(m_.h_SST[i], kv_cnt, i);
+   gpu::SSTEncode* p = new gpu::SSTEncode(m_.cache.GetHsst(), kv_cnt, i);
+    //gpu::SSTEncode* p = new gpu::SSTEncode(m_.h_SST[i], kv_cnt, i);
     p->SetMemory(&m_, sort.out_size_ - last_keys);
     last_keys -= kv_cnt;
     encodes.push_back(p);
@@ -1781,10 +1784,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact, bool isSeek) {
 
   if (isSeek) {
     for (int i = 0; i < SST_kv_cnts.size(); ++i) {
-      // encodes[i]->DoEncode_1();
-      // encodes[i]->DoEncode_2();
-      // encodes[i]->DoEncode_3();
-      // encodes[i]->DoEncode_4();
       int kv_cnt = SST_kv_cnts[i];
       gpu::SSTEncode* pencode = encodes[i];
       gpu::SST_kv* p = m_.h_skv_sorted;
@@ -1804,11 +1803,14 @@ Status DBImpl::DoCompactionWork(CompactionState* compact, bool isSeek) {
       mutex_.Unlock();
       compact->total_bytes += out.file_size;
       std::string name = TableFileName(dbname_, out.number);
-      pencode->WriteFile(name);
-      // FILE* file = ::fopen(name.data(), "wb");
-      // ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
-      // ::fsync(fileno(file));
-      // ::fclose(file);
+      //pencode->WriteFile(name);
+      //
+      FILE* file = ::fopen(name.data(), "wb");
+      ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
+      ::fsync(fileno(file));
+      ::fclose(file);
+      m_.cache.PutHsst(name,pencode->h_SST_);
+      //m_.cache.q.push(pencode->h_SST_);
       delete pencode;
       last_keys -= kv_cnt;
     }
@@ -1835,9 +1837,14 @@ Status DBImpl::DoCompactionWork(CompactionState* compact, bool isSeek) {
       mutex_.Unlock();
       compact->total_bytes += out.file_size;
       std::string name = TableFileName(dbname_, out.number);
+      //
+      //m_.cache.PutHsst(name,pencode->h_SST_);
+      //m_.cache.q.push(pencode->h_SST_);
       wr[i].name = name;
       wr[i].encode = pencode;
+      wr[i].mt=&m_;
       pthread_create(&tidp[i], NULL, thread_write_file, (void*)&wr[i]);
+      
       last_keys -= kv_cnt;
     }
     {
@@ -1861,12 +1868,15 @@ Status DBImpl::DoCompactionWork(CompactionState* compact, bool isSeek) {
       mutex_.Unlock();
       compact->total_bytes += out.file_size;
       std::string name = TableFileName(dbname_, out.number);
-      pencode->WriteFile(name);
+      //pencode->WriteFile(name);
+      
 
-      // FILE* file = ::fopen(name.data(), "wb");
-      // ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
-      // ::fsync(fileno(file));
-      // ::fclose(file);
+      FILE* file = ::fopen(name.data(), "wb");
+      ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
+      ::fsync(fileno(file));
+      ::fclose(file);
+      m_.cache.PutHsst(name,pencode->h_SST_);
+      //m_.cache.q.push(pencode->h_SST_);
       delete pencode;
       last_keys -= kv_cnt;
     }
