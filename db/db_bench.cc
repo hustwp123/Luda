@@ -18,6 +18,9 @@
 #include "util/random.h"
 #include "util/testutil.h"
 
+#include "util/monitor_impl.h" //xp
+#include <chrono>
+
 // Comma-separated list of operations to run in the specified order
 //   Actual benchmarks:
 //      fillseq       -- write N values in sequential key order in async mode
@@ -257,6 +260,7 @@ class Stats {
     if (done_ < 1) done_ = 1;
 
     std::string extra;
+    double elapsed = (finish_ - start_) * 1e-6; //xp    
     if (bytes_ > 0) {
       // Rate is computed on actual elapsed time, not the sum of per-thread
       // elapsed times.
@@ -270,6 +274,7 @@ class Stats {
 
     fprintf(stdout, "%-12s : %11.3f micros/op;%s%s\n", name.ToString().c_str(),
             seconds_ * 1e6 / done_, (extra.empty() ? "" : " "), extra.c_str());
+    fprintf(stdout, "Uptime (second): %8.1f\n", elapsed); //xp            
     if (FLAGS_histogram) {
       fprintf(stdout, "Microseconds per op:\n%s\n", hist_.ToString().c_str());
     }
@@ -721,6 +726,15 @@ class Benchmark {
     WriteBatch batch;
     Status s;
     int64_t bytes = 0;
+    auto start_micros = std::chrono::high_resolution_clock::now(); //xp
+    auto end_micros = start_micros;
+    auto start_anchor_micros = start_micros; //xp time point of DoWrite begins
+    std::chrono::microseconds op_elapsed_micros;
+    std::chrono::seconds bench_elapsed_micros;
+    auto last_report_micros = start_micros;
+    std::chrono::seconds report_elapsed_micros; //xp put time hiccup
+    auto time_point = std::chrono::high_resolution_clock::now();
+
     for (int i = 0; i < num_; i += entries_per_batch_) {
       batch.Clear();
       for (int j = 0; j < entries_per_batch_; j++) {
@@ -732,7 +746,37 @@ class Benchmark {
         bytes += value_size_ + strlen(key);
         thread->stats.FinishedSingleOp();
       }
+      start_micros = std::chrono::high_resolution_clock::now(); //xp
       s = db_->Write(write_options_, &batch);
+      end_micros = std::chrono::high_resolution_clock::now();
+      op_elapsed_micros = 
+        std::chrono::duration_cast<std::chrono::microseconds> (end_micros-start_micros);
+      
+      iostats_.Add(kPutHiccup, op_elapsed_micros.count());
+
+      report_elapsed_micros = 
+        std::chrono::duration_cast<std::chrono::seconds> (end_micros - last_report_micros);
+      bench_elapsed_micros = 
+        std::chrono::duration_cast<std::chrono::seconds> (end_micros - start_anchor_micros);
+      if(std::chrono::seconds(1) < report_elapsed_micros) { //xp output every 2 second -_-//...
+        // timestamp(s), latency min, max, avg., 99th
+        fprintf(stderr, "%4d   %8ld  %8ld  %8ld  %8ld  %8ld  %8ld\n", 
+                  thread->tid,
+                  bench_elapsed_micros.count(),
+                  (int64_t) iostats_.Count(kPutHiccup)/report_elapsed_micros.count(),
+                  iostats_.Access(kPutHiccup, 2), 
+                  iostats_.Access(kPutHiccup, 3), iostats_.Access(kPutHiccup, 0),
+                  iostats_.Access(kPutHiccup, 1));
+        fprintf(iostats_.fp_report_file, "%4d   %8ld  %8ld  %8ld  %8ld  %8ld  %8ld\n", 
+                  thread->tid,
+                  bench_elapsed_micros.count(),
+                  (int64_t) iostats_.Count(kPutHiccup)/report_elapsed_micros.count(),
+                  iostats_.Access(kPutHiccup, 2), 
+                  iostats_.Access(kPutHiccup, 3), iostats_.Access(kPutHiccup, 0),
+                  iostats_.Access(kPutHiccup, 1));
+        iostats_.Reset(kPutHiccup);
+        last_report_micros = end_micros;
+      }      
       if (!s.ok()) {
         fprintf(stderr, "put error: %s\n", s.ToString().c_str());
         exit(1);
@@ -771,12 +815,52 @@ class Benchmark {
     ReadOptions options;
     std::string value;
     int found = 0;
+    int64_t bytes = 0;
+    auto start_micros = std::chrono::high_resolution_clock::now(); //xp
+    auto end_micros = start_micros;
+    auto start_anchor_micros = start_micros; //xp time point of DoWrite begins
+    std::chrono::microseconds op_elapsed_micros;
+    std::chrono::seconds bench_elapsed_micros;
+    auto last_report_micros = start_micros;
+    std::chrono::seconds report_elapsed_micros; //xp put time hiccup
+    auto time_point = std::chrono::high_resolution_clock::now();
+
     for (int i = 0; i < reads_; i++) {
       char key[100];
       const int k = thread->rand.Next() % FLAGS_num;
       snprintf(key, sizeof(key), "%016d", k);
+      start_micros = std::chrono::high_resolution_clock::now(); //xp      
       if (db_->Get(options, key, &value).ok()) {
         found++;
+      }
+      end_micros = std::chrono::high_resolution_clock::now();
+      op_elapsed_micros = 
+        std::chrono::duration_cast<std::chrono::microseconds> (end_micros-start_micros);
+      
+      iostats_.Add(kGetHiccup, op_elapsed_micros.count());
+
+      report_elapsed_micros = 
+        std::chrono::duration_cast<std::chrono::seconds> (end_micros - last_report_micros);
+      bench_elapsed_micros = 
+        std::chrono::duration_cast<std::chrono::seconds> (end_micros - start_anchor_micros);
+      if(std::chrono::seconds(1) < report_elapsed_micros) { //xp output every 2 second -_-//...
+        // timestamp(s), ops, latency min, max, avg., 99th
+        fprintf(stderr, "%4d   %8ld  %8ld  %8ld  %8ld  %8ld  %8ld\n", 
+                  thread->tid,
+                  bench_elapsed_micros.count(),
+                  (int64_t) iostats_.Count(kGetHiccup)/report_elapsed_micros.count(),
+                  iostats_.Access(kGetHiccup, 2), 
+                  iostats_.Access(kGetHiccup, 3), iostats_.Access(kGetHiccup, 0),
+                  iostats_.Access(kGetHiccup, 1));
+        fprintf(iostats_.fp_report_file, "%4d   %8ld  %8ld  %8ld  %8ld  %8ld  %8ld\n", 
+                  thread->tid,
+                  bench_elapsed_micros.count(),
+                  (int64_t) iostats_.Count(kGetHiccup)/report_elapsed_micros.count(),
+                  iostats_.Access(kGetHiccup, 2), 
+                  iostats_.Access(kGetHiccup, 3), iostats_.Access(kGetHiccup, 0),
+                  iostats_.Access(kGetHiccup, 1));
+        iostats_.Reset(kGetHiccup);
+        last_report_micros = end_micros;        
       }
       thread->stats.FinishedSingleOp();
     }
@@ -968,6 +1052,10 @@ int main(int argc, char** argv) {
       exit(1);
     }
   }
+
+  fprintf(stdout, "commands: "); //xp
+  for(int i = 0; i < argc; i++) { fprintf(stdout, "%s ", argv[i]); }
+  fprintf(stdout, "\n");  
 
   leveldb::g_env = leveldb::Env::Default();
 

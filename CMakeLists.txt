@@ -163,6 +163,8 @@ target_sources(leveldb
         "${PROJECT_SOURCE_DIR}/util/hash.h"
         "${PROJECT_SOURCE_DIR}/util/logging.cc"
         "${PROJECT_SOURCE_DIR}/util/logging.h"
+        "${PROJECT_SOURCE_DIR}/util/monitor.cc" 
+        "${PROJECT_SOURCE_DIR}/util/monitor.h"  #xp
         "${PROJECT_SOURCE_DIR}/util/mutexlock.h"
         "${PROJECT_SOURCE_DIR}/util/no_destructor.h"
         "${PROJECT_SOURCE_DIR}/util/options.cc"
@@ -267,7 +269,8 @@ endif(HAVE_TCMALLOC)
 
 # Needed by port_stdcxx.h
 find_package(Threads REQUIRED)
-target_link_libraries(leveldb Threads::Threads)
+#target_link_libraries(leveldb Threads::Threads)
+target_link_libraries(leveldb Threads::Threads hdr_histogram) #xp
 
 add_executable(leveldbutil
         "${PROJECT_SOURCE_DIR}/db/leveldbutil.cc"

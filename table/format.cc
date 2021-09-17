@@ -10,6 +10,9 @@
 #include "util/coding.h"
 #include "util/crc32c.h"
 
+#include "util/monitor_impl.h"
+#include <stdio.h>
+
 namespace leveldb {
 
 void BlockHandle::EncodeTo(std::string* dst) const {
@@ -73,7 +76,12 @@ Status ReadBlock(RandomAccessFile* file, const ReadOptions& options,
   size_t n = static_cast<size_t>(handle.size());
   char* buf = new char[n + kBlockTrailerSize];
   Slice contents;
+  auto start = std::chrono::high_resolution_clock::now();
   Status s = file->Read(handle.offset(), n + kBlockTrailerSize, &contents, buf);
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::microseconds us = std::chrono::duration_cast<std::chrono::microseconds> (end-start);
+  iostats_.Add(kReadFile, us.count()); //xp
+
   if (!s.ok()) {
     delete[] buf;
     return s;
@@ -86,7 +94,11 @@ Status ReadBlock(RandomAccessFile* file, const ReadOptions& options,
   // Check the crc of the type and the block contents
   const char* data = contents.data();  // Pointer to where Read put the data
   if (options.verify_checksums && 0) {
+    start = std::chrono::high_resolution_clock::now();
     const uint32_t crc = crc32c::Unmask(DecodeFixed32(data + n + 1));
+    end = std::chrono::high_resolution_clock::now();
+    us = std::chrono::duration_cast<std::chrono::microseconds> (end-start);
+    iostats_.Add(kUncrc, us.count()); //xp
     const uint32_t actual = crc32c::Value(data, n + 1);
     if (actual != crc) {
       delete[] buf;
@@ -95,6 +107,7 @@ Status ReadBlock(RandomAccessFile* file, const ReadOptions& options,
     }
   }
 
+  start = std::chrono::high_resolution_clock::now();
   switch (data[n]) {
     case kNoCompression:
       if (data != buf) {
@@ -154,6 +167,9 @@ Status ReadBlock(RandomAccessFile* file, const ReadOptions& options,
         break;
       }
   }
+  end = std::chrono::high_resolution_clock::now();
+  us = std::chrono::duration_cast<std::chrono::microseconds> (end-start);
+  iostats_.Add(kDecomp, us.count()); //xp
 
   return Status::OK();
 }

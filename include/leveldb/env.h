@@ -45,6 +45,24 @@
 
 namespace leveldb {
 
+//xp
+// corresponds to members of IOStats in util/monitor.h
+enum IOStatEntry {
+  kReadFile,
+  kUncrc,
+  kDecomp,
+  kMerge,
+  kComp,
+  kCrc,
+  kWrite,
+  kDecodeFrom,
+  kEncodeTo,
+  kGet,
+  kPut,
+  kGetHiccup,
+  kPutHiccup
+};
+
 class FileLock;
 class Logger;
 class RandomAccessFile;

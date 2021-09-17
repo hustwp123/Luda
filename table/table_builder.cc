@@ -16,6 +16,9 @@
 #include "util/coding.h"
 #include "util/crc32c.h"
 
+#include <chrono>
+#include "util/monitor_impl.h"
+
 namespace leveldb {
 
 struct TableBuilder::Rep {
@@ -163,6 +166,7 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
   Slice block_contents;
   CompressionType type = r->options.compression;
   // TODO(postrelease): Support more compression options: zlib?
+  auto start = std::chrono::high_resolution_clock::now();  
   switch (type) {
     case kNoCompression:
       block_contents = raw;
@@ -182,6 +186,9 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
       break;
     }
   }
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::microseconds us = std::chrono::duration_cast<std::chrono::microseconds> (end-start);
+  iostats_.Add(kComp, us.count()); //xp  
   WriteRawBlock(block_contents, type, handle);
   r->compressed_output.clear();
   block->Reset();
@@ -197,8 +204,12 @@ void TableBuilder::WriteRawBlock(const Slice& block_contents,
   if (r->status.ok()) {
     char trailer[kBlockTrailerSize];
     trailer[0] = type;
+    auto start = std::chrono::high_resolution_clock::now();    
     uint32_t crc = crc32c::Value(block_contents.data(), block_contents.size());
     crc = crc32c::Extend(crc, trailer, 1);  // Extend crc to cover block type
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::microseconds us = std::chrono::duration_cast<std::chrono::microseconds> (end-start);
+    iostats_.Add(kCrc, us.count()); //xp    
     EncodeFixed32(trailer + 1, crc32c::Mask(crc));
     r->status = r->file->Append(Slice(trailer, kBlockTrailerSize));
     if (r->status.ok()) {

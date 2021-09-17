@@ -12,6 +12,9 @@
 #include "leveldb/env.h"
 #include "leveldb/iterator.h"
 
+#include <chrono>
+#include "util/monitor_impl.h"
+
 namespace leveldb {
 
 Status BuildTable(const std::string& dbname, Env* env, const Options& options,
@@ -46,9 +49,13 @@ Status BuildTable(const std::string& dbname, Env* env, const Options& options,
     delete builder;
 
     // Finish and check for file errors
+    auto start = std::chrono::high_resolution_clock::now();    
     if (s.ok()) {
       s = file->Sync();
     }
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::microseconds us = std::chrono::duration_cast<std::chrono::microseconds> (end-start);
+    iostats_.Add(kWrite, us.count()); //xp      
     if (s.ok()) {
       s = file->Close();
     }
