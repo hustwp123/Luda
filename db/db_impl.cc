@@ -57,7 +57,7 @@ void* thread_write_file(void* arg) {
   write_file* pf = (write_file*)arg;
   gpu::SSTEncode* pencode = pf->encode;
 
-  // /pencode->WriteFile(pf->name);
+  //pencode->WriteFile(pf->name);
 
   FILE* file = ::fopen(pf->name.data(), "wb");
   ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
@@ -171,10 +171,12 @@ Status DBImpl::GPUWriteLevel0(const std::string& dbname, Env* env,
 
     // Finish and check for builder errors
     meta->file_size = encode.cur_;
-   // encode.WriteFile(fname);
+    //encode.WriteFile(fname);
+
     FILE* f = ::fopen(fname.data(), "wb");
     ::fwrite(encode.h_SST_, 1, encode.cur_, f);
     ::fclose(f);
+
     //m_.cache.q.push(encode.h_SST_);
     m_.cache.PutHsst(fname,encode.h_SST_);
 
@@ -1735,7 +1737,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact, bool isSeek) {
       keys = 0;
       file_size = 0;
     }
-
     ++keys;
   }
   // fprintf(stderr,"all_file_size=%d\n",all_file_size);
@@ -1809,6 +1810,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact, bool isSeek) {
       ::fwrite(pencode->h_SST_, 1, pencode->cur_, file);
       ::fsync(fileno(file));
       ::fclose(file);
+
       m_.cache.PutHsst(name,pencode->h_SST_);
       //m_.cache.q.push(pencode->h_SST_);
       delete pencode;

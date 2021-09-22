@@ -2671,3 +2671,7 @@
  17-09-2021 10:32:00:188 [pid=5559 tid=5678] ERROR  cufio-px-pool:336 primaryctx: 0x55b028582140
  17-09-2021 10:32:00:188 [pid=5559 tid=5674] ERROR  cufio-px-pool:336 primaryctx: 0x55b028582140
  17-09-2021 10:32:00:188 [pid=5559 tid=5679] ERROR  cufio-px-pool:336 primaryctx: 0x55b028582140
+ 18-09-2021 15:02:43:155 [pid=9170 tid=9170] ERROR  cufio-udev:441 no devices found by udev enumeration for pci class: infiniband
+ 18-09-2021 15:02:43:158 [pid=9170 tid=9170] ERROR  cufio-udev:441 no devices found by udev enumeration for pci class: infiniband
+ 18-09-2021 15:02:43:159 [pid=9170 tid=9170] ERROR  cufio-udev:441 no devices found by udev enumeration for pci class: infiniband
+ 18-09-2021 15:02:43:177 [pid=9170 tid=9170] ERROR  cufio-px-pool:336 primaryctx: 0x5619353e8140
