@@ -7,8 +7,8 @@
 
 #include "util/crc32c.h"
 
-#include "/home/wp/moderngpu/src/moderngpu/kernel_merge.hxx"
-#include "/home/wp/moderngpu/src/moderngpu/kernel_mergesort.hxx"
+#include "/root/moderngpu-2.13.0/src/moderngpu/kernel_merge.hxx"
+#include "/root/moderngpu-2.13.0/src/moderngpu/kernel_mergesort.hxx"
 #include "cuda/data.h"
 #include "cuda/decode_kv.h"
 #include "cuda/format.h"

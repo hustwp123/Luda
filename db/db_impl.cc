@@ -64,6 +64,7 @@ void* thread_write_file(void* arg) {
   ::fclose(file);
 
   delete pencode;
+  return nullptr;
 }
 
 void thread_Decode(std::vector<gpu::SSTDecode*> decodes) {

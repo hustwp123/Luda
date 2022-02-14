@@ -274,7 +274,7 @@ namespace leveldb {
   }
   
   int IOStats::OpenReportFile() {
-    report_fname = "/home/xp/2log/" + GetFormattedTimeStamp() +".hiccup";
+    report_fname = "/root/logs/luda.hiccup";
     fp_report_file = fopen(report_fname.c_str(), "w+");
     if(!fp_report_file) {
       fprintf(stderr, "ERROR! %s:%d: %s open report file %s failed\n",
@@ -283,6 +283,7 @@ namespace leveldb {
     }
     fprintf(fp_report_file, "#tID  timestamp      op/s    LatMin    LatMax    LatAvg   Lat99th\n");
     fprintf(stderr, "#tID  timestamp      op/s    LatMin    LatMax    LatAvg   Lat99th\n");
+    return 0;
   }
 
   void IOStats::AppendToReportFile(const char* contents) {
